@@ -90,12 +90,8 @@ final class ProfileViewModel {
 
     Task {
       do {
-        print("[DEBUG] Fetching initial user data")
-        try await fetchUserData()
-        print("[DEBUG] Fetching initial content")
-        await fetchContent()
-        print("[DEBUG] Fetching bookmark collections")
-        await fetchBookmarkCollections()
+        print("[DEBUG] Setting up data streams")
+        await setupDataStreams()
         print("[DEBUG] Initial data fetch complete")
       } catch {
         print("[ERROR] Error initializing profile: \(error)")
@@ -114,11 +110,136 @@ final class ProfileViewModel {
     }
   }
 
-  private func addListener(_ registration: ListenerRegistration) {
-    Task { [weak self, registration] in
-      await self?.listenerStore.add {
-        registration.remove()
+  private func setupDataStreams() async {
+    // Setup user data listener
+    let userRef = db.collection("users").document(userId)
+    let userListener = userRef.addSnapshotListener { [weak self] snapshot, error in
+      guard let self = self else { return }
+      Task {
+        do {
+          if let data = snapshot?.data() {
+            try await self.processUserData(data)
+          }
+        } catch {
+          print("[ERROR] Error processing user data: \(error)")
+        }
       }
+    }
+    await listenerStore.add { userListener.remove() }
+
+    // Setup videos listener
+    let videosQuery = db.collection("videos")
+      .whereField("creatorId", isEqualTo: userId)
+      .order(by: "createdAt", descending: true)
+    
+    let videosListener = videosQuery.addSnapshotListener { [weak self] snapshot, error in
+      guard let self = self else { return }
+      if let error = error {
+        print("[ERROR] Error fetching videos: \(error)")
+        return
+      }
+      
+      let videos = snapshot?.documents.compactMap { doc -> Video? in
+        try? doc.data(as: Video.self)
+      } ?? []
+      
+      self.videos = videos
+    }
+    await listenerStore.add { videosListener.remove() }
+
+    // Setup liked videos listener using collection group query
+    let likedVideosQuery = db.collectionGroup("likes")
+      .whereField("userId", isEqualTo: userId)
+      .order(by: "timestamp", descending: true)
+    
+    let likedVideosListener = likedVideosQuery.addSnapshotListener { [weak self] snapshot, error in
+      guard let self = self else { return }
+      Task {
+        if let error = error {
+          print("[ERROR] Error fetching liked videos: \(error)")
+          return
+        }
+        
+        // Get the parent video IDs
+        let videoIds = snapshot?.documents.compactMap { doc -> String? in
+          doc.reference.parent.parent?.documentID
+        } ?? []
+        
+        // Fetch the actual videos
+        var allVideos: [Video] = []
+        for chunk in videoIds.chunked(into: 10) {
+          do {
+            let videoSnapshot = try await self.db.collection("videos")
+              .whereField(FieldPath.documentID(), in: chunk)
+              .getDocuments()
+            
+            let videos = videoSnapshot.documents.compactMap { doc -> Video? in
+              try? doc.data(as: Video.self)
+            }
+            allVideos.append(contentsOf: videos)
+          } catch {
+            print("[ERROR] Error fetching video details: \(error)")
+          }
+        }
+        
+        await MainActor.run {
+          self.likedVideos = allVideos.sorted { $0.createdAt > $1.createdAt }
+        }
+      }
+    }
+    await listenerStore.add { likedVideosListener.remove() }
+
+    // Setup bookmark collections listener
+    if isCurrentUserProfile {
+      let bookmarksQuery = db.collection("users")
+        .document(userId)
+        .collection("bookmarkCollections")
+      
+      let bookmarksListener = bookmarksQuery.addSnapshotListener { [weak self] snapshot, error in
+        guard let self = self else { return }
+        if let error = error {
+          print("[ERROR] Error fetching bookmarks: \(error)")
+          return
+        }
+        
+        self.bookmarkCollections = snapshot?.documents.compactMap { doc in
+          try? doc.data(as: BookmarkCollection.self)
+        } ?? []
+      }
+      await listenerStore.add { bookmarksListener.remove() }
+    }
+  }
+
+  private func processUserData(_ data: [String: Any]) async throws {
+    var userData = data
+    userData["id"] = userId
+    
+    // Handle nested ageRange structure
+    if let ageRange = userData["ageRange"] as? [String: Any] {
+      userData["ageRange.min"] = ageRange["min"] as? Int ?? 18
+      userData["ageRange.max"] = ageRange["max"] as? Int ?? 100
+      userData.removeValue(forKey: "ageRange")
+    }
+    
+    // Handle boolean fields
+    for field in ["isDatingEnabled", "isPrivate"] {
+      if let value = userData[field] {
+        if let boolValue = value as? Bool {
+          userData[field] = boolValue
+        } else if let intValue = value as? Int {
+          userData[field] = (intValue != 0)
+        }
+      }
+    }
+    
+    let decoder = Firestore.Decoder()
+    decoder.keyDecodingStrategy = .useDefaultKeys
+    
+    user = try decoder.decode(User.self, from: userData)
+    isPrivateAccount = user?.isPrivate ?? false
+    
+    if !isCurrentUserProfile {
+      await checkFollowStatus()
     }
   }
 
@@ -154,69 +275,6 @@ final class ProfileViewModel {
       print("[ERROR] Failed to check follow status: \(error)")
       errorMessage = "Failed to check follow status"
       showError = true
-    }
-  }
-
-  func fetchUserData() async throws {
-    print("[DEBUG] fetchUserData - Starting for userId: \(userId)")
-    guard !userId.isEmpty else {
-      print("[ERROR] fetchUserData - Empty userId")
-      throw NSError(
-        domain: "ProfileViewModel", code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "User ID is missing"])
-    }
-    print("[DEBUG] fetchUserData - userId: \(userId)")
-
-    print("[DEBUG] Fetching document at path: users/\(userId)")
-    let docRef = db.collection("users").document(userId)
-    let snapshot = try await docRef.getDocument()
-
-    if var data = snapshot.data() {
-      print("[DEBUG] Raw user data: \(data)")
-      
-      // Set the ID before decoding
-      data["id"] = userId
-      
-      // Handle nested ageRange structure
-      if let ageRange = data["ageRange"] as? [String: Any] {
-        data["ageRange.min"] = ageRange["min"] as? Int ?? 18
-        data["ageRange.max"] = ageRange["max"] as? Int ?? 100
-        data.removeValue(forKey: "ageRange")
-      }
-      
-      // Handle boolean fields
-      for field in ["isDatingEnabled", "isPrivate"] {
-        if let value = data[field] {
-          if let boolValue = value as? Bool {
-            data[field] = boolValue
-          } else if let intValue = value as? Int {
-            data[field] = (intValue != 0)
-          }
-        }
-      }
-      
-      // Handle arrays
-      if let datingImages = data["datingImages"] as? [String] {
-        data["datingImages"] = datingImages
-      } else {
-        data["datingImages"] = [String]()
-      }
-      
-      // Handle timestamps
-      if let timestamp = data["createdAt"] as? Timestamp {
-        data["createdAt"] = timestamp.dateValue()
-      }
-      
-      print("[DEBUG] Processed data before decoding: \(data)")
-      let decoder = Firestore.Decoder()
-      decoder.keyDecodingStrategy = .useDefaultKeys
-      
-      user = try decoder.decode(User.self, from: data)
-      isPrivateAccount = user?.isPrivate ?? false
-      print("[DEBUG] Decoded user: \(String(describing: user))")
-      await checkFollowStatus()
-    } else {
-      print("[WARNING] No data found for user document")
     }
   }
 

@@ -142,8 +142,7 @@ struct _ProfileView: View {
           // Tab Content
           switch selectedTab {
           case 0:
-            VideosGridView(userId: effectiveUserId)
-              .id(effectiveUserId) // Force refresh when user changes
+            VideosGridView(userId: effectiveUserId, videos: viewModel.videos)
           case 1 where displayUser.isDatingEnabled:
             DatingProfileSection(user: displayUser)
           case 2:
@@ -184,10 +183,7 @@ struct _ProfileView: View {
     print("[DEBUG] userViewModel.user.id: \(String(describing: userViewModel.user.id))")
 
     // Refresh user data
-    if userId != nil {
-      print("[DEBUG] Refreshing specific user data")
-      try? await viewModel.fetchUserData()
-    } else {
+    if userId == nil {
       if let currentUser = userViewModel.user.id {
         print("[DEBUG] Refreshing current user data: \(currentUser)")
         try? await userViewModel.loadUser(userId: currentUser)
@@ -349,8 +345,7 @@ struct DatingProfileSection: View {
 
 struct VideosGridView: View {
   let userId: String
-  @StateObject private var viewModel = VideosGridViewModel()
-  @State private var isRefreshing = false
+  let videos: [Video]
   
   // Fixed grid layout with minimal spacing
   private let columns = [
@@ -361,24 +356,7 @@ struct VideosGridView: View {
   
   var body: some View {
     Group {
-      if viewModel.isLoading {
-        ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else if let error = viewModel.error {
-        VStack(spacing: 12) {
-          Image(systemName: "exclamationmark.triangle")
-            .font(.largeTitle)
-            .foregroundColor(.red)
-          Text(error.localizedDescription)
-            .multilineTextAlignment(.center)
-          Button("Retry") {
-            viewModel.fetchVideos(for: userId)
-          }
-          .buttonStyle(.bordered)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else if viewModel.videos.isEmpty {
+      if videos.isEmpty {
         VStack(spacing: 12) {
           Image(systemName: "video.slash")
             .font(.largeTitle)
@@ -390,8 +368,8 @@ struct VideosGridView: View {
       } else {
         ScrollView {
           LazyVGrid(columns: columns, spacing: 1) {
-            ForEach(viewModel.videos) { video in
-              NavigationLink(destination: VideoDetailView(video: video, videos: viewModel.videos)) {
+            ForEach(videos) { video in
+              NavigationLink(destination: VideoDetailView(video: video, videos: videos)) {
                 VideoThumbnailView(video: video)
                   .background(Color.black)
               }
@@ -400,14 +378,6 @@ struct VideosGridView: View {
         }
         .background(Color.black.opacity(0.2))
       }
-    }
-    .onAppear {
-      print("[DEBUG] VideosGridView appeared for userId: \(userId)")
-      viewModel.fetchVideos(for: userId)
-    }
-    .onChange(of: userId) { oldValue, newValue in
-      print("[DEBUG] UserId changed from \(oldValue) to \(newValue)")
-      viewModel.fetchVideos(for: newValue)
     }
   }
 }
