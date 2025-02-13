@@ -78,25 +78,54 @@ struct VideoThumbnailView: View {
   }
 }
 
+struct VideoGrid: View {
+  let videos: [Video]
+  let onVideoTap: (Video) -> Void
+  
+  var body: some View {
+    LazyVGrid(
+      columns: [
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1),
+        GridItem(.flexible(), spacing: 1)
+      ],
+      spacing: 1
+    ) {
+      ForEach(videos) { video in
+        Button {
+          onVideoTap(video)
+        } label: {
+          VideoThumbnailView(video: video)
+            .aspectRatio(9/16, contentMode: .fill)
+        }
+      }
+    }
+    .padding(.horizontal, 1)
+  }
+}
+
 #Preview {
-  VideoThumbnailView(
-    video: Video(
-      id: "preview",
-      creatorId: "user1",
-      caption: "Test video",
-      videoURL: "https://example.com/video.mp4",
-      thumbnailURL: "https://example.com/thumbnail.jpg",
-      likes: 0,
-      comments: 0,
-      shares: 0,
-      createdAt: Date(),
-      duration: 65,
-      hashtags: ["test"],
-      viewCount: 1000,
-      completionRate: 0.8,
-      engagementScore: 0.7,
-      aspectRatio: .portrait
-    )
+  VideoGrid(
+    videos: [
+      Video(
+        id: "preview1",
+        creatorId: "user1",
+        caption: "Test video 1",
+        videoURL: "https://example.com/video1.mp4",
+        thumbnailURL: "https://example.com/thumbnail1.jpg",
+        duration: 30,
+        hashtags: ["test"]
+      ),
+      Video(
+        id: "preview2",
+        creatorId: "user1",
+        caption: "Test video 2",
+        videoURL: "https://example.com/video2.mp4",
+        thumbnailURL: "https://example.com/thumbnail2.jpg",
+        duration: 45,
+        hashtags: ["test"]
+      )
+    ],
+    onVideoTap: { _ in }
   )
-  .frame(width: 200)
 }

@@ -72,6 +72,11 @@ service cloud.firestore {
       }
     }
     
+    // Add collection group rules for likes
+    match /{path=**}/likes/{likeId} {
+      allow read: if isSignedIn();
+    }
+    
     match /videos/{videoId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();

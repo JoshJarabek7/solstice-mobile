@@ -18,11 +18,10 @@ struct DatingSettingsView: View {
 
       if viewModel.user.isDatingEnabled {
         basicInformationSection
-        datingPreferencesSection
         datingPhotosSection
       }
     }
-    .navigationTitle("Dating Settings")
+    .navigationTitle("Dating Profile")
     .onChange(of: selectedPhotos) { oldValue, newValue in
       handlePhotoSelection(newValue)
     }
@@ -100,71 +99,6 @@ struct DatingSettingsView: View {
           } catch {
             print("Error updating bio: \(error)")
             viewModel.user.bio = oldValue
-          }
-        }
-      }
-    }
-  }
-
-  private var datingPreferencesSection: some View {
-    Section("Dating Preferences") {
-      interestedInLink
-      distancePreference
-    }
-  }
-
-  private var interestedInLink: some View {
-    NavigationLink {
-      MultipleSelectionList(
-        title: "Interested In",
-        options: User.Gender.allCases,
-        selected: Set(viewModel.user.interestedIn),
-        onSelectionChanged: { selected in
-          let oldValue = viewModel.user.interestedIn
-          viewModel.user.interestedIn = Array(selected)
-          Task {
-            do {
-              try await viewModel.updateUser()
-            } catch {
-              print("Error updating interested in: \(error)")
-              viewModel.user.interestedIn = oldValue
-            }
-          }
-        }
-      )
-    } label: {
-      HStack {
-        Text("Interested In")
-        Spacer()
-        Text(
-          viewModel.user.interestedIn.map { $0.rawValue.capitalized }
-            .joined(separator: ", ")
-        )
-        .foregroundColor(.gray)
-      }
-    }
-  }
-
-  private var distancePreference: some View {
-    Group {
-      HStack {
-        Text("Maximum Distance")
-        Spacer()
-        Text("\(Int(viewModel.user.maxDistance)) miles")
-      }
-
-      Slider(
-        value: $viewModel.user.maxDistance,
-        in: 1...100,
-        step: 1
-      )
-      .onChange(of: viewModel.user.maxDistance) { oldValue, newValue in
-        Task {
-          do {
-            try await viewModel.updateUser()
-          } catch {
-            print("Error updating max distance: \(error)")
-            viewModel.user.maxDistance = oldValue
           }
         }
       }

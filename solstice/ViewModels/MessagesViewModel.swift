@@ -50,7 +50,8 @@ final class SendableListeners {
 final class MessagesViewModel {
   @ObservationIgnored private let db = Firestore.firestore()
   @ObservationIgnored private let listeners = SendableListeners()
-  @ObservationIgnored private let currentUserId: String
+  @ObservationIgnored private var authStateListener: AuthStateDidChangeListenerHandle?
+  @ObservationIgnored private var currentUserId: String = ""
   
   var regularChats: [Chat] = [] {
     didSet {
@@ -65,6 +66,7 @@ final class MessagesViewModel {
   var isLoading = false
   var error: Error?
   var errorMessage: String?
+  var isAuthenticated = false
 
   private func fetchUser(id userId: String) async throws -> User {
     let userDoc = try await db.collection("users").document(userId).getDocument()
@@ -88,27 +90,40 @@ final class MessagesViewModel {
 
   init() {
     print("[DEBUG] Initializing MessagesViewModel")
-    self.currentUserId = Auth.auth().currentUser?.uid ?? ""
-    print("[DEBUG] Current user ID: \(currentUserId)")
-    
-    // Start loading chats immediately
-    Task {
-      print("[DEBUG] Starting initial chat load")
-      await loadChats()
-      print("[DEBUG] Completed initial chat load")
-      print("[DEBUG] Regular chats: \(regularChats.count)")
-      print("[DEBUG] Group chats: \(groupChats.count)")
-      print("[DEBUG] Dating chats: \(datingChats.count)")
-    }
+    setupAuthStateListener()
   }
 
   deinit {
     print("[DEBUG] MessagesViewModel deinit - cleaning up listeners")
+    if let authStateListener = authStateListener {
+      Auth.auth().removeStateDidChangeListener(authStateListener)
+    }
     listeners.cleanup()
   }
 
+  private func setupAuthStateListener() {
+    authStateListener = Auth.auth().addStateDidChangeListener { [weak self] (_, user) in
+      guard let self = self else { return }
+      Task { @MainActor in
+        if let user = user {
+          self.currentUserId = user.uid
+          self.isAuthenticated = true
+          print("[DEBUG] Auth state changed - user authenticated: \(user.uid)")
+          await self.loadChats()
+        } else {
+          self.currentUserId = ""
+          self.isAuthenticated = false
+          self.regularChats = []
+          self.groupChats = []
+          self.datingChats = []
+          print("[DEBUG] Auth state changed - user signed out")
+        }
+      }
+    }
+  }
+
   func loadChats() async {
-    guard !currentUserId.isEmpty else {
+    guard isAuthenticated, !currentUserId.isEmpty else {
       print("[ERROR] Cannot load chats - user not authenticated")
       errorMessage = "User not authenticated"
       return
@@ -291,7 +306,9 @@ final class MessagesViewModel {
     do {
       // Create decoder with document data in userInfo
       let decoder = Firestore.Decoder()
-      decoder.userInfo[.documentDataKey] = document.data()
+      let data = document.data()
+      decoder.userInfo[.documentDataKey] = data
+      print("[DEBUG] Chat document data: \(data)")
       
       // Decode the chat data
       let chatData = try document.data(as: ChatDocumentData.self, decoder: decoder)
@@ -409,10 +426,9 @@ final class MessagesViewModel {
                     do {
                         // Create decoder with document data in userInfo
                         let decoder = Firestore.Decoder()
-                        if let data = doc.data() as? [String: Any] {
-                            decoder.userInfo[.documentDataKey] = data
-                            print("[DEBUG] Chat document data: \(data)")
-                        }
+                        let data = doc.data()
+                        decoder.userInfo[.documentDataKey] = data
+                        print("[DEBUG] Chat document data: \(data)")
                         
                         // Decode chat document data
                         let chatData = try decoder.decode(ChatDocumentData.self, from: doc.data())
@@ -854,7 +870,7 @@ final class MessagesViewModel {
       try await batch.commit()
       
       // Force a refresh of the chat list to update the UI
-      await MainActor.run {
+      let _ = await MainActor.run {
         Task {
           await self.loadChats()
           
@@ -990,6 +1006,22 @@ final class MessagesViewModel {
     
     return updatedChat
   }
+
+  public func sendMessage(_ message: Message, in chat: Chat) async throws {
+    guard let chatId = chat.id else { throw ChatError.invalidChatId }
+    
+    let messageRef = db.collection("chats").document(chatId).collection("messages").document()
+    var messageData = message
+    messageData.id = messageRef.documentID
+    
+    try messageRef.setData(from: messageData)
+    
+    // Update chat's last activity and message
+    try await db.collection("chats").document(chatId).updateData([
+      "lastActivity": Timestamp(date: Date()),
+      "lastMessage": messageData
+    ])
+  }
 }
 
 enum ChatError: LocalizedError {
@@ -1002,6 +1034,7 @@ enum ChatError: LocalizedError {
   case invalidChat
   case invalidMessage
   case chatCreationFailed
+  case invalidChatId
 
   var errorDescription: String? {
     switch self {
@@ -1023,6 +1056,8 @@ enum ChatError: LocalizedError {
       return "Invalid message: missing ID"
     case .chatCreationFailed:
       return "Failed to create chat"
+    case .invalidChatId:
+      return "Invalid chat ID"
     }
   }
 }

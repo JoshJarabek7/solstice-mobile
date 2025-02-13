@@ -38,3 +38,5 @@ When making firebase rules, lean more towards permissiveness than strictness, as
 If there are new linter errors after modifying something, it might be because we need to build.
 
 You should be using document id's to reference documents for everything. Don't store the entire document in the state. We need data consistency (single source of truth), no duplication of data, smaller document sizes, and easier to keep information up to date.
+
+There is no Observation package import, it's part of the SwiftUI package.

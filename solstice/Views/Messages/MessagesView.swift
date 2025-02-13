@@ -33,7 +33,7 @@ final class MessagesTimerState {
 struct MessagesView: View {
   // IMPORTANT: We rely on the new Observations system (@Observable).
   // So instead of requiring ObservableObject & @ObservedObject / @StateObject,
-  // we do this. SwiftUI will track changes in real time on iOS 17+.
+  // we do this. SwiftUI will track changes in real time on iOS 17+.
   @Bindable var viewModel: MessagesViewModel
 
   @State private var showNewMessage = false
@@ -127,8 +127,7 @@ private struct MessagesNewChatSheet: View {
   var body: some View {
     NavigationStack {
       NewMessageView(
-        messagesViewModel: viewModel,
-        selectedChat: $selectedChat
+        messagesViewModel: viewModel
       )
     }
     .onChange(of: selectedChat) { _, newChat in

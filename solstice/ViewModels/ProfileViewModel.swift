@@ -37,39 +37,40 @@ actor ListenerStore {
   }
 }
 
+@Observable
 @MainActor
-final class ProfileViewModel: ObservableObject {
-  let userViewModel: UserViewModel
+final class ProfileViewModel {
   // User Data
-  @Published var user: User?
-  @Published var videos: [Video] = []
-  @Published var likedVideos: [Video] = []
-  @Published var followers: [User] = []
-  @Published var following: [User] = []
-  @Published var isLoading = false
-  @Published var error: Error?
-  @Published var showError = false
-  @Published var errorMessage = ""
+  var user: User?
+  var videos: [Video] = []
+  var likedVideos: [Video] = []
+  var followers: [User] = []
+  var following: [User] = []
+  var isLoading = false
+  var error: Error?
+  var showError = false
+  var errorMessage = ""
 
   // Profile Stats
-  @Published var followerCount = 0
-  @Published var followingCount = 0
-  @Published var isPrivateAccount = false
-  @Published var isCurrentUserProfile = false
-  @Published var isFollowing = false
-  @Published var followRequestSent = false
+  var followerCount = 0
+  var followingCount = 0
+  var isPrivateAccount = false
+  var isCurrentUserProfile = false
+  var isFollowing = false
+  var followRequestSent = false
 
   // Bookmark Collections
-  @Published var bookmarkCollections: [BookmarkCollection] = []
-  @Published var selectedBookmarkCollection: BookmarkCollection?
-  @Published var showCreateCollectionSheet = false
-  @Published var newCollectionName = ""
+  var bookmarkCollections: [BookmarkCollection] = []
+  var selectedBookmarkCollection: BookmarkCollection?
+  var showCreateCollectionSheet = false
+  var newCollectionName = ""
 
   private let userId: String
   private let db = Firestore.firestore()
   private let listenerStore = ListenerStore()
+  let userViewModel: UserViewModel
 
-  init(userId: String? = nil, userViewModel: UserViewModel = UserViewModel()) throws {
+  init(userId: String? = nil, userViewModel: UserViewModel) throws {
     print("[DEBUG] ProfileViewModel.init - Starting initialization")
     print("[DEBUG] Input userId: \(String(describing: userId))")
     print(
@@ -297,20 +298,18 @@ final class ProfileViewModel: ObservableObject {
     }
 
     do {
-      print("[DEBUG] Fetching liked videos collection at path: users/\(userId)/likedVideos")
-      // First get the user's liked videos collection
-      let likedVideosRef = db.collection("users")
-        .document(userId)
-        .collection("likedVideos")
-
-      let likedSnapshot =
-        try await likedVideosRef
+      print("[DEBUG] Fetching videos liked by user: \(userId)")
+      
+      // Get all videos where this user has a like document
+      let likedVideosQuery = db.collectionGroup("likes")
+        .whereField("userId", isEqualTo: userId)
         .order(by: "timestamp", descending: true)
-        .getDocuments()
-
-      // Get the video IDs
-      let videoIds = likedSnapshot.documents.compactMap { doc in
-        doc.documentID
+      
+      let likedSnapshot = try await likedVideosQuery.getDocuments()
+      
+      // Get the parent video IDs
+      let videoIds = likedSnapshot.documents.compactMap { doc -> String? in
+        doc.reference.parent.parent?.documentID
       }
 
       print("[DEBUG] Found \(videoIds.count) liked video IDs")

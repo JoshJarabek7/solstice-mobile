@@ -45,27 +45,24 @@ struct ShareSheet: View {
               }
 
               // Download button
-              Button(action: {
+              ShareOptionRow(
+                icon: "arrow.down.circle.fill",
+                title: isDownloading ? "Downloading..." : "Download Video",
+                isSystemImage: true
+              ) {
                 Task {
                   isDownloading = true
                   await viewModel.downloadVideo(video)
                   isDownloading = false
                   dismiss()
                 }
-              }) {
-                HStack {
-                  Image(systemName: "arrow.down.circle.fill")
-                    .font(.title2)
-                  Text("Download Video")
-                  if isDownloading {
-                    Spacer()
-                    ProgressView()
-                  }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
               }
               .disabled(isDownloading)
+              
+              if isDownloading {
+                ProgressView()
+                  .padding()
+              }
             } else {
               // Search results
               ForEach(viewModel.searchResults) { user in

@@ -221,8 +221,8 @@ final class VideoCreationViewModel: ObservableObject {
       // Create storage references
       let storageRef = Storage.storage().reference()
       let videosRef = storageRef.child("videos")
-      let videoRef = videosRef.child(videoId).child("video.mp4")
-      let thumbnailRef = videosRef.child(videoId).child("thumbnail.jpg")
+      let videoRef = videosRef.child(videoId).child(videoFilename)
+      let thumbnailRef = videosRef.child(videoId).child(thumbnailFilename)
       
       // Upload video first to create the parent directory
       processingStatus = "Uploading video..."

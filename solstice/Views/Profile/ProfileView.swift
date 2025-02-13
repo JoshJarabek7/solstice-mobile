@@ -5,6 +5,7 @@ import SwiftUI
 // Public typealias for backward compatibility
 typealias ProfileView = ProfileViewContainer
 
+@MainActor
 struct ProfileViewContainer: View {
   let userId: String?
   @State private var error: Error?
@@ -34,19 +35,9 @@ struct ProfileViewContainer: View {
     }
     .task {
       guard viewModel == nil else { return }
-
-      print("[DEBUG] ProfileViewContainer.task - Starting initialization")
-      print("[DEBUG] userId: \(String(describing: userId))")
-      print("[DEBUG] Auth.currentUser?.uid: \(String(describing: Auth.auth().currentUser?.uid))")
-      print("[DEBUG] userViewModel.user.id: \(String(describing: userViewModel.user.id))")
-
-      // Only try to create ProfileViewModel if we have a userId or current user
       do {
-        print("[DEBUG] Attempting to create ProfileViewModel")
         viewModel = try ProfileViewModel(userId: userId, userViewModel: userViewModel)
-        print("[DEBUG] Successfully created ProfileViewModel")
       } catch {
-        print("[ERROR] Failed to create ProfileViewModel: \(error)")
         self.error = error
       }
     }
@@ -54,13 +45,15 @@ struct ProfileViewContainer: View {
 }
 
 // Renamed to _ProfileView to indicate it's an implementation detail
+@MainActor
 struct _ProfileView: View {
   let userId: String?
-  @ObservedObject var viewModel: ProfileViewModel
+  let viewModel: ProfileViewModel
   @Environment(UserViewModel.self) var userViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var selectedTab = 0
   @State private var isRefreshing = false
+  @Namespace private var tabNamespace
 
   private var effectiveUserId: String {
     if let specificUserId = userId {
@@ -106,34 +99,45 @@ struct _ProfileView: View {
           .padding()
 
           // Tabs
-          HStack {
-            TabButton(
-              title: "Videos",
-              systemImage: "play.square",
-              isSelected: selectedTab == 0
-            ) {
-              selectedTab = 0
-            }
-
-            if displayUser.isDatingEnabled {
+          VStack(spacing: 0) {
+            HStack(spacing: 0) {
               TabButton(
-                title: "Dating",
-                systemImage: "heart",
-                isSelected: selectedTab == 1
+                title: "Videos",
+                isSelected: selectedTab == 0,
+                namespace: tabNamespace
               ) {
-                selectedTab = 1
+                withAnimation(.easeInOut) {
+                  selectedTab = 0
+                }
+              }
+
+              if displayUser.isDatingEnabled {
+                TabButton(
+                  title: "Dating",
+                  isSelected: selectedTab == 1,
+                  namespace: tabNamespace
+                ) {
+                  withAnimation(.easeInOut) {
+                    selectedTab = 1
+                  }
+                }
+              }
+
+              TabButton(
+                title: "Likes",
+                isSelected: selectedTab == 2,
+                namespace: tabNamespace
+              ) {
+                withAnimation(.easeInOut) {
+                  selectedTab = 2
+                }
               }
             }
-
-            TabButton(
-              title: "Liked",
-              systemImage: "heart.fill",
-              isSelected: selectedTab == 2
-            ) {
-              selectedTab = 2
-            }
+            .padding(.horizontal)
+            
+            Divider()
           }
-          .padding(.horizontal)
+          .background(.background)
 
           // Tab Content
           switch selectedTab {
@@ -200,20 +204,27 @@ struct _ProfileView: View {
 
 struct TabButton: View {
   let title: String
-  let systemImage: String
   let isSelected: Bool
+  let namespace: Namespace.ID
   let action: () -> Void
 
   var body: some View {
     Button(action: action) {
-      VStack(spacing: 8) {
-        Image(systemName: systemImage)
-          .font(.system(size: 24))
+      VStack(spacing: 0) {
         Text(title)
-          .font(.caption)
+          .font(.subheadline)
+          .fontWeight(isSelected ? .semibold : .regular)
+          .foregroundColor(isSelected ? .primary : .gray)
+          .padding(.vertical, 12)
+        
+        // Underline indicator
+        Rectangle()
+          .fill(isSelected ? Color.blue : Color.clear)
+          .frame(height: 3)
+          .matchedGeometryEffect(id: "tab_indicator", in: namespace, isSource: isSelected)
       }
-      .foregroundColor(isSelected ? .primary : .gray)
     }
+    .frame(maxWidth: .infinity)
   }
 }
 
@@ -264,11 +275,8 @@ struct DatingProfileSection: View {
   let user: User
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Dating Profile")
-        .font(.headline)
-        .padding(.horizontal)
-
+    VStack(alignment: .leading, spacing: 16) {
+      // Dating Images
       ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 12) {
           ForEach(user.datingImages, id: \.self) { imageURL in
@@ -286,7 +294,56 @@ struct DatingProfileSection: View {
         }
         .padding(.horizontal)
       }
+
+      // Dating Bio
+      if let bio = user.bio {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("About")
+            .font(.headline)
+          Text(bio)
+            .font(.body)
+        }
+        .padding(.horizontal)
+      }
+
+      // Basic Info
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Basic Info")
+          .font(.headline)
+
+        HStack {
+          Label("Gender", systemImage: "person.fill")
+          Spacer()
+          Text(user.gender.rawValue.capitalized)
+            .foregroundColor(.gray)
+        }
+
+        if !user.interestedIn.isEmpty {
+          HStack {
+            Label("Interested in", systemImage: "heart.fill")
+            Spacer()
+            Text(user.interestedIn.map { $0.rawValue.capitalized }.joined(separator: ", "))
+              .foregroundColor(.gray)
+          }
+        }
+
+        HStack {
+          Label("Maximum Distance", systemImage: "location.fill")
+          Spacer()
+          Text("\(Int(user.maxDistance)) miles")
+            .foregroundColor(.gray)
+        }
+
+        HStack {
+          Label("Age Range", systemImage: "calendar")
+          Spacer()
+          Text("\(user.ageRangeMin) - \(user.ageRangeMax)")
+            .foregroundColor(.gray)
+        }
+      }
+      .padding(.horizontal)
     }
+    .padding(.vertical)
   }
 }
 
@@ -359,22 +416,25 @@ struct LikedVideosGridView: View {
   let videos: [Video]
 
   var body: some View {
-    LazyVGrid(
-      columns: [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-      ], spacing: 2
-    ) {
-      ForEach(videos) { video in
-        NavigationLink(destination: VideoDetailView(video: video, videos: videos)) {
-          VideoThumbnailView(video: video)
-            .aspectRatio(9 / 16, contentMode: .fill)
-            .clipped()
+    Group {
+      if videos.isEmpty {
+        VStack(spacing: 12) {
+          Image(systemName: "heart.slash")
+            .font(.system(size: 50))
+            .foregroundColor(.gray)
+          Text("No liked videos yet")
+            .font(.headline)
+            .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        VideoGrid(videos: videos) { video in
+          NavigationLink(destination: VideoDetailView(video: video, videos: videos)) {
+            EmptyView()
+          }
         }
       }
     }
-    .padding(.horizontal, 1)
   }
 }
 

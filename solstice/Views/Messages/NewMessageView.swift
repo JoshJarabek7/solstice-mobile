@@ -1,11 +1,12 @@
 import FirebaseAuth
 import FirebaseFirestore
 import SwiftUI
+import Observation
 
 struct NewMessageView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var searchViewModel = UserSearchViewModel()
-    @StateObject private var messagesViewModel = MessagesViewModel()
+    private let messagesViewModel: MessagesViewModel
     @State private var searchText = ""
     @State private var selectedUsers: Set<User> = []
     @State private var isGroup = false
@@ -16,7 +17,8 @@ struct NewMessageView: View {
     @State private var navigateToChat: Chat?
     let videoToShare: Video?
     
-    init(videoToShare: Video? = nil) {
+    init(messagesViewModel: MessagesViewModel, videoToShare: Video? = nil) {
+        self.messagesViewModel = messagesViewModel
         self.videoToShare = videoToShare
     }
     
@@ -172,19 +174,19 @@ struct NewMessageView: View {
     @MainActor
     private func createChat() {
         Task {
-            let isGroupChat = isGroup && selectedUsers.count > 1
-            let title = isGroupChat ? groupTitle.trimmingCharacters(in: .whitespacesAndNewlines) : nil
-            
-            if isGroupChat && title?.isEmpty == true {
-                errorMessage = "Please enter a group title"
-                showError = true
-                return
-            }
-            
-            let localSelectedUsers = Array(selectedUsers)
-            let chat = await Task.detached {
+            do {
+                let isGroupChat = isGroup && selectedUsers.count > 1
+                let title = isGroupChat ? groupTitle.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+                
+                if isGroupChat && title?.isEmpty == true {
+                    errorMessage = "Please enter a group title"
+                    showError = true
+                    return
+                }
+                
+                let localSelectedUsers = Array(selectedUsers)
                 let chatRef = Firestore.firestore().collection("chats").document()
-                return Chat(
+                let chat = Chat(
                     id: chatRef.documentID,
                     participants: localSelectedUsers,
                     lastActivity: Date(),
@@ -200,37 +202,43 @@ struct NewMessageView: View {
                     createdAt: Date(),
                     createdBy: Auth.auth().currentUser?.uid
                 )
-            }.value
-            
-            // If there's a video to share, create a message with the video
-            if let video = videoToShare {
-                let metadata = MessageMetadata(
-                    videoId: video.id,
-                    videoThumbnail: video.thumbnailURL,
-                    videoCaption: video.caption,
-                    videoCreator: Auth.auth().currentUser?.uid ?? ""
-                )
                 
-                let message = Message(
-                    id: UUID().uuidString,
-                    senderId: Auth.auth().currentUser?.uid ?? "",
-                    content: video.caption ?? "",
-                    timestamp: Date(),
-                    type: .video,
-                    metadata: metadata,
-                    reactions: [:],
-                    replyTo: nil,
-                    replyPreview: nil,
-                    readBy: [],
-                    deliveredTo: []
-                )
+                // Create the chat document
+                try chatRef.setData(from: chat)
                 
-                try await messagesViewModel.sendMessage(message, in: chat)
+                // If there's a video to share, create a message with the video
+                if let video = videoToShare {
+                    let metadata = MessageMetadata(
+                        videoId: video.id,
+                        videoThumbnail: video.thumbnailURL,
+                        videoCaption: video.caption,
+                        videoCreator: Auth.auth().currentUser?.uid ?? ""
+                    )
+                    
+                    let message = Message(
+                        id: UUID().uuidString,
+                        senderId: Auth.auth().currentUser?.uid ?? "",
+                        content: video.caption ?? "",
+                        timestamp: Date(),
+                        type: .video,
+                        metadata: metadata,
+                        reactions: [:],
+                        replyTo: nil,
+                        replyPreview: nil,
+                        readBy: [],
+                        deliveredTo: []
+                    )
+                    
+                    try await messagesViewModel.sendMessage(message, in: chat)
+                }
+                
+                selectedChat = chat
+                navigateToChat = chat
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+                showError = true
             }
-            
-            selectedChat = chat
-            navigateToChat = chat
-            dismiss()
         }
     }
 }
@@ -321,6 +329,7 @@ struct MessageUserRow: View {
 #Preview {
     NavigationStack {
         NewMessageView(
+            messagesViewModel: MessagesViewModel(),
             videoToShare: nil
         )
     }

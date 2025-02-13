@@ -882,7 +882,7 @@ class ChatViewModel {
       Task {
         do {
           // Process messages with improved error handling
-          let messages = try messageSnapshot?.documents.compactMap { document -> Message? in
+          let messages = messageSnapshot?.documents.compactMap { document -> Message? in
             do {
               let data = document.data()
               print("[DEBUG] Processing message document: \(data)")
@@ -903,7 +903,7 @@ class ChatViewModel {
           
           // Process events
           let eventSnapshot = try await eventsQuery.getDocuments()
-          let events = try eventSnapshot.documents.compactMap { document -> ChatEvent? in
+          let events = eventSnapshot.documents.compactMap { document -> ChatEvent? in
             do {
               let data = document.data()
               print("[DEBUG] Processing event document: \(data)")

@@ -58,7 +58,7 @@ struct VideoDetailView: View {
                       ProfileViewContainer(userId: creatorId)
                     } label: {
                       VStack(alignment: .leading, spacing: 2) {
-                        Text(creator.fullName ?? creator.username)
+                        Text(creator.fullName)
                           .foregroundColor(.white)
                           .font(.system(size: 16, weight: .semibold))
                         Text("@\(creator.username)")
@@ -216,7 +216,7 @@ struct VideoDetailView: View {
       }
     }
     .sheet(isPresented: $showShareSheet) {
-      VideoShareSheet(video: currentVideo)
+      ShareSheet(video: currentVideo)
     }
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarHidden(true)
@@ -383,79 +383,6 @@ struct CommentRow: View {
       .padding(.leading, 8)
     }
     .padding(.horizontal)
-  }
-}
-
-struct VideoShareSheet: View {
-  let video: Video
-  @Environment(\.dismiss) private var dismiss
-  
-  var body: some View {
-    NavigationStack {
-      VStack(spacing: 20) {
-        // Share preview
-        AsyncImage(url: URL(string: video.thumbnailURL ?? "")) { image in
-          image
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-        } placeholder: {
-          Rectangle()
-            .fill(Color.gray.opacity(0.3))
-        }
-        .frame(height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding()
-        
-        // Share options
-        VStack(spacing: 30) {
-          HStack(spacing: 40) {
-            ShareButton(title: "WhatsApp", image: "whatsapp", action: {})
-            ShareButton(title: "Message", image: "message", action: {})
-            ShareButton(title: "Instagram", image: "instagram", action: {})
-          }
-          
-          HStack(spacing: 40) {
-            ShareButton(title: "Save", systemImage: "square.and.arrow.down", action: {})
-            ShareButton(title: "Duet", systemImage: "person.2", action: {})
-            ShareButton(title: "React", systemImage: "face.smiling", action: {})
-          }
-        }
-        .padding()
-        
-        Spacer()
-        
-        Button("Cancel") {
-          dismiss()
-        }
-        .padding()
-      }
-    }
-    .presentationDetents([.medium])
-    .presentationDragIndicator(.visible)
-  }
-}
-
-struct ShareButton: View {
-  let title: String
-  var image: String? = nil
-  var systemImage: String? = nil
-  let action: () -> Void
-  
-  var body: some View {
-    Button(action: action) {
-      VStack {
-        if let systemImage = systemImage {
-          Image(systemName: systemImage)
-            .font(.system(size: 24))
-        } else if let image = image {
-          Image(image)
-            .resizable()
-            .frame(width: 30, height: 30)
-        }
-        Text(title)
-          .font(.caption)
-      }
-    }
   }
 }
 
