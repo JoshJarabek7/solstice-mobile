@@ -1,0 +1,18 @@
+{
+    // "editor.formatOnSave": true,
+    "files.exclude": {
+        "**/.git": true,
+        "**/.DS_Store": true,
+        "**/xcuserdata": true,
+        "**/DerivedData": true
+    },
+    "files.watcherExclude": {
+        "**/DerivedData/**": true,
+        "**/Pods/**": true
+    },
+    "swift.SDK": "",
+    "lldb.library": "/opt/homebrew/Cellar/swift/6.0.3/Swift-6.0.xctoolchain/System/Library/PrivateFrameworks/LLDB.framework/Versions/A/LLDB",
+    "lldb.launch.expressions": "native",
+    "sweetpad.build.xcodeWorkspacePath": "solstice.xcodeproj/project.xcworkspace",
+    "sweetpad.xcodegen.autogenerate": true
+}

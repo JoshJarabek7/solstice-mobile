@@ -1,0 +1,44 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build and Run on Device",
+            "type": "shell",
+            "command": "sweetpad",
+            "args": [
+                "launch",
+                "--scheme",
+                "solstice",
+                "--configuration",
+                "Debug"
+            ],
+            "problemMatcher": [
+                "$sweetpad-watch",
+                "$sweetpad-xcodebuild-default",
+                "$sweetpad-xcbeautify-errors",
+                "$sweetpad-xcbeautify-warnings"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "focus": true,
+                "clear": true
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ],
+    "files.watcherExclude": {
+        "**/target": true,
+        "**/build": true
+    },
+    "tasks.autoDetect": "on",
+    "tasks.runOn": "folderOpen",
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    "files.watcherInclude": [
+        "**/*.swift"
+    ]
+} 

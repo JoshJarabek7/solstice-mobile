@@ -1,0 +1,40 @@
+
+We're building a TikTok-esque app with some dating involved.
+We need 6 different user stories.
+Things that are out of scope are music/sounds. Creating a video should be simple and have passing editing like cropping the start/end time of the video.
+We should transcode on device before uploading to Firebase.
+Ensure you're using the latest Firebase syntax - we're using iOS 11.8.1 SDK Firebase package.
+Only use the latest Swift 6, iOS 18, SF Symbols 6, SwiftUI and Xcode 16.2.
+We will not persist data.
+Before doing anything ALWAYS lookup up the correct syntax for the specific version of whatever you're writing.
+Use Firebase for everything (storage, database, auth, etc.)
+Have some basic recommendation algorithms using Firebase for example, for recommending users to follow, dating to swipe on, videos to show, etc.
+Calculate it using similar likes, follows, commenting on same videos, etc.
+Implement swiping cards.
+Have geolocation and store the user's coordinates in the database to determine how geographically close two users are by miles.
+Dating should have basic filters and should only show those who match filters or the inverse, for example a straight woman and a straight male. We can put the genders they're interested in and only show those genders if their filters match the user swiping. Both sides have to line up. There should be a distance filter as well.
+It's currently February 2025.
+Have follow request for users who are private. Only show videos from people who are either public, or if they're private they should be following them to see their videos/profile.
+Have the option for a short bio.
+Have the ability to like/dislike them directly from their profile, or via a dating tab where you're swiping cards like Tinder/Hinge.
+Dating profiles can have up to 5 images of them, but the main draw is getting a better understanding of someone than you could with traditional dating apps by viewing their profile and videos they've posted and videos they've liked.
+There should be a bookmarks section with bookmarks collections that bookmarks can go in. There should be a main default bookmark collection that cannot be deleted.
+Deletions should cascade.
+There should be direct messaging, either between two individuals or group chats. They should update in real time. There shouldn't be an option to create a new chat if a chat already exists with all the same users in it.
+There should be a way to search for videos and people.
+There should be a notifications center.
+Push notifications would be nice, but that should come last.
+Notifications in the notification center should take you to the relevant place, for example, a notification that someone liked your post should take you to that post if you click on it.
+There should be notification groupings, so that we don't clutter the notification center, for example "Jesse, David, and 5 others like your post" vs 7 different notifications.
+Dating should be optional, users should be able to switch it on or off. We should only show dating profiles for those active.
+Firebase has been installed in the project using Swift's package manager.
+
+Make sure you have #Preview in view files.
+
+The planning for what we're building is stored in UIPlanner.md at the root of the project.
+
+When making firebase rules, lean more towards permissiveness than strictness, as we're developing the features and will make the rules more restrictive as we get closer to deployment.
+
+If there are new linter errors after modifying something, it might be because we need to build.
+
+You should be using document id's to reference documents for everything. Don't store the entire document in the state. We need data consistency (single source of truth), no duplication of data, smaller document sizes, and easier to keep information up to date.

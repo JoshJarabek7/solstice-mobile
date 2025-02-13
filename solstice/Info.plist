@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
+	<key>FirebaseAutomaticScreenReportingEnabled</key>
+	<true/>
+	<key>FirebaseMessagingAutoInitEnabled</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+		<string>processing</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Solstice needs your location to show you relevant content and people nearby.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Solstice needs your location to show you relevant content and people nearby, even when the app is in the background.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>PreciseLocationPurpose</key>
+		<string>Solstice needs precise location temporarily to accurately show you people nearby.</string>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Solstice needs camera access to let you create videos and take photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Solstice needs photo library access to let you share photos and videos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Solstice needs microphone access to record video with sound.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>This allows Solstice to provide you with a better, personalized experience and relevant content.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

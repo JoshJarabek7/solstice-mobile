@@ -1,0 +1,516 @@
+@preconcurrency import FirebaseAuth
+@preconcurrency import FirebaseFirestore
+@preconcurrency import FirebaseStorage
+@preconcurrency import SwiftUI
+
+// Helper extension for chunking arrays
+extension Array {
+  func chunked(into size: Int) -> [[Element]] {
+    return stride(from: 0, to: count, by: size).map {
+      Array(self[$0..<Swift.min($0 + size, count)])
+    }
+  }
+}
+
+enum ProfileError: LocalizedError {
+  case noUserID
+
+  var errorDescription: String? {
+    switch self {
+    case .noUserID:
+      return "Unable to load profile: No user ID available"
+    }
+  }
+}
+
+actor ListenerStore {
+  private(set) var listeners: [@Sendable () -> Void] = []
+
+  func add(_ listener: @Sendable @escaping () -> Void) {
+    listeners.append(listener)
+  }
+
+  func removeAll() -> [@Sendable () -> Void] {
+    let current = listeners
+    listeners.removeAll()
+    return current
+  }
+}
+
+@MainActor
+final class ProfileViewModel: ObservableObject {
+  let userViewModel: UserViewModel
+  // User Data
+  @Published var user: User?
+  @Published var videos: [Video] = []
+  @Published var likedVideos: [Video] = []
+  @Published var followers: [User] = []
+  @Published var following: [User] = []
+  @Published var isLoading = false
+  @Published var error: Error?
+  @Published var showError = false
+  @Published var errorMessage = ""
+
+  // Profile Stats
+  @Published var followerCount = 0
+  @Published var followingCount = 0
+  @Published var isPrivateAccount = false
+  @Published var isCurrentUserProfile = false
+  @Published var isFollowing = false
+  @Published var followRequestSent = false
+
+  // Bookmark Collections
+  @Published var bookmarkCollections: [BookmarkCollection] = []
+  @Published var selectedBookmarkCollection: BookmarkCollection?
+  @Published var showCreateCollectionSheet = false
+  @Published var newCollectionName = ""
+
+  private let userId: String
+  private let db = Firestore.firestore()
+  private let listenerStore = ListenerStore()
+
+  init(userId: String? = nil, userViewModel: UserViewModel = UserViewModel()) throws {
+    print("[DEBUG] ProfileViewModel.init - Starting initialization")
+    print("[DEBUG] Input userId: \(String(describing: userId))")
+    print(
+      "[DEBUG] Current Auth.currentUser?.uid: \(String(describing: Auth.auth().currentUser?.uid))")
+
+    self.userViewModel = userViewModel
+
+    // Get the user ID, throwing an error if none is available
+    guard let validUserId = userId ?? Auth.auth().currentUser?.uid else {
+      print("[ERROR] No valid userId available for ProfileViewModel")
+      throw ProfileError.noUserID
+    }
+
+    print("[DEBUG] Using validUserId: \(validUserId)")
+    self.userId = validUserId
+    self.isCurrentUserProfile = userId == nil || userId == Auth.auth().currentUser?.uid
+
+    Task {
+      do {
+        print("[DEBUG] Fetching initial user data")
+        try await fetchUserData()
+        print("[DEBUG] Fetching initial content")
+        await fetchContent()
+        print("[DEBUG] Fetching bookmark collections")
+        await fetchBookmarkCollections()
+        print("[DEBUG] Initial data fetch complete")
+      } catch {
+        print("[ERROR] Error initializing profile: \(error)")
+        self.error = error
+        self.showError = true
+      }
+    }
+  }
+
+  deinit {
+    Task { [listeners = listenerStore] in
+      let currentListeners = await listeners.removeAll()
+      for listener in currentListeners {
+        listener()
+      }
+    }
+  }
+
+  private func addListener(_ registration: ListenerRegistration) {
+    Task { [weak self, registration] in
+      await self?.listenerStore.add {
+        registration.remove()
+      }
+    }
+  }
+
+  private func checkFollowStatus() async {
+    guard let currentUserId = Auth.auth().currentUser?.uid,
+      currentUserId != userId
+    else {
+      print("[DEBUG] checkFollowStatus - Skipping (currentUser is nil or same as profile)")
+      return
+    }
+
+    do {
+      print(
+        "[DEBUG] Checking follow status for currentUserId: \(currentUserId) -> targetId: \(userId)")
+      // Check if following
+      let followDoc = try await db.collection("follows")
+        .whereField("followerId", isEqualTo: currentUserId)
+        .whereField("followedId", isEqualTo: userId)
+        .getDocuments()
+
+      isFollowing = !followDoc.documents.isEmpty
+      print("[DEBUG] isFollowing: \(isFollowing)")
+
+      // Check if follow request exists
+      let requestDoc = try await db.collection("followRequests")
+        .whereField("requesterId", isEqualTo: currentUserId)
+        .whereField("targetId", isEqualTo: userId)
+        .getDocuments()
+
+      followRequestSent = !requestDoc.documents.isEmpty
+      print("[DEBUG] followRequestSent: \(followRequestSent)")
+    } catch {
+      print("[ERROR] Failed to check follow status: \(error)")
+      errorMessage = "Failed to check follow status"
+      showError = true
+    }
+  }
+
+  func fetchUserData() async throws {
+    print("[DEBUG] fetchUserData - Starting for userId: \(userId)")
+    guard !userId.isEmpty else {
+      print("[ERROR] fetchUserData - Empty userId")
+      throw NSError(
+        domain: "ProfileViewModel", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "User ID is missing"])
+    }
+    print("[DEBUG] fetchUserData - userId: \(userId)")
+
+    print("[DEBUG] Fetching document at path: users/\(userId)")
+    let docRef = db.collection("users").document(userId)
+    let snapshot = try await docRef.getDocument()
+
+    if var data = snapshot.data() {
+      print("[DEBUG] Raw user data: \(data)")
+      
+      // Set the ID before decoding
+      data["id"] = userId
+      
+      // Handle nested ageRange structure
+      if let ageRange = data["ageRange"] as? [String: Any] {
+        data["ageRange.min"] = ageRange["min"] as? Int ?? 18
+        data["ageRange.max"] = ageRange["max"] as? Int ?? 100
+        data.removeValue(forKey: "ageRange")
+      }
+      
+      // Handle boolean fields
+      for field in ["isDatingEnabled", "isPrivate"] {
+        if let value = data[field] {
+          if let boolValue = value as? Bool {
+            data[field] = boolValue
+          } else if let intValue = value as? Int {
+            data[field] = (intValue != 0)
+          }
+        }
+      }
+      
+      // Handle arrays
+      if let datingImages = data["datingImages"] as? [String] {
+        data["datingImages"] = datingImages
+      } else {
+        data["datingImages"] = [String]()
+      }
+      
+      // Handle timestamps
+      if let timestamp = data["createdAt"] as? Timestamp {
+        data["createdAt"] = timestamp.dateValue()
+      }
+      
+      print("[DEBUG] Processed data before decoding: \(data)")
+      let decoder = Firestore.Decoder()
+      decoder.keyDecodingStrategy = .useDefaultKeys
+      
+      user = try decoder.decode(User.self, from: data)
+      isPrivateAccount = user?.isPrivate ?? false
+      print("[DEBUG] Decoded user: \(String(describing: user))")
+      await checkFollowStatus()
+    } else {
+      print("[WARNING] No data found for user document")
+    }
+  }
+
+  func fetchContent() async {
+    print("[DEBUG] fetchContent - Starting")
+    await MainActor.run {
+      isLoading = true
+      error = nil
+      showError = false
+    }
+
+    await withTaskGroup(of: Void.self) { group in
+      // Fetch videos
+      group.addTask {
+        print("[DEBUG] Starting video fetch")
+        await self.fetchVideos()
+      }
+
+      // Fetch liked videos
+      group.addTask {
+        print("[DEBUG] Starting liked videos fetch")
+        await self.fetchLikedVideos()
+      }
+
+      // Wait for all tasks to complete
+      await group.waitForAll()
+      print("[DEBUG] All content fetches complete")
+    }
+
+    await MainActor.run {
+      isLoading = false
+    }
+  }
+
+  func refreshContent() async {
+    // Clear existing data
+    await MainActor.run {
+      videos.removeAll()
+      likedVideos.removeAll()
+      isLoading = true
+      error = nil
+      showError = false
+    }
+
+    // Fetch fresh content
+    await fetchContent()
+  }
+
+  private func fetchVideos() async {
+    print("[DEBUG] fetchVideos - Starting for userId: \(userId)")
+    do {
+      let snapshot = try await db.collection("videos")
+        .whereField("creatorId", isEqualTo: userId)
+        .order(by: "createdAt", descending: true)
+        .getDocuments()
+
+      let fetchedVideos = try snapshot.documents.compactMap { doc -> Video? in
+        try doc.data(as: Video.self)
+      }
+
+      print("[DEBUG] Fetched \(fetchedVideos.count) videos")
+      await MainActor.run {
+        self.videos = fetchedVideos
+      }
+    } catch {
+      print("[ERROR] Error fetching videos: \(error)")
+      await MainActor.run {
+        self.error = error
+        self.showError = true
+      }
+    }
+  }
+
+  private func fetchLikedVideos() async {
+    print("[DEBUG] fetchLikedVideos - Starting for userId: \(userId)")
+    guard !userId.isEmpty else {
+      print("[ERROR] fetchLikedVideos - Empty userId")
+      return
+    }
+
+    do {
+      print("[DEBUG] Fetching liked videos collection at path: users/\(userId)/likedVideos")
+      // First get the user's liked videos collection
+      let likedVideosRef = db.collection("users")
+        .document(userId)
+        .collection("likedVideos")
+
+      let likedSnapshot =
+        try await likedVideosRef
+        .order(by: "timestamp", descending: true)
+        .getDocuments()
+
+      // Get the video IDs
+      let videoIds = likedSnapshot.documents.compactMap { doc in
+        doc.documentID
+      }
+
+      print("[DEBUG] Found \(videoIds.count) liked video IDs")
+
+      // If no liked videos, return empty array
+      if videoIds.isEmpty {
+        print("[DEBUG] No liked videos found")
+        await MainActor.run {
+          self.likedVideos = []
+        }
+        return
+      }
+
+      // Fetch the actual videos in batches of 10
+      var allVideos: [Video] = []
+      for chunk in videoIds.chunked(into: 10) {
+        let snapshot = try await db.collection("videos")
+          .whereField(FieldPath.documentID(), in: chunk)
+          .getDocuments()
+
+        let videos = try snapshot.documents.compactMap { doc -> Video? in
+          try doc.data(as: Video.self)
+        }
+        allVideos.append(contentsOf: videos)
+      }
+
+      print("[DEBUG] Successfully fetched \(allVideos.count) liked videos")
+
+      await MainActor.run {
+        self.likedVideos = allVideos.sorted { $0.createdAt > $1.createdAt }
+      }
+    } catch {
+      print("[ERROR] Error fetching liked videos: \(error)")
+      await MainActor.run {
+        self.error = error
+        self.showError = true
+      }
+    }
+  }
+
+  func fetchBookmarkCollections() async {
+    print("[DEBUG] fetchBookmarkCollections - Starting")
+    print("[DEBUG] isCurrentUserProfile: \(isCurrentUserProfile)")
+    print("[DEBUG] userId: \(userId)")
+
+    guard isCurrentUserProfile else {
+      print("[DEBUG] fetchBookmarkCollections - Skipping (not current user's profile)")
+      return
+    }
+
+    do {
+      print("[DEBUG] Fetching bookmark collections at path: users/\(userId)/bookmarkCollections")
+      let snapshot = try await db.collection("users")
+        .document(userId)
+        .collection("bookmarkCollections")
+        .getDocuments()
+
+      bookmarkCollections = try snapshot.documents.compactMap { doc in
+        try doc.data(as: BookmarkCollection.self)
+      }
+      print("[DEBUG] Found \(bookmarkCollections.count) bookmark collections")
+
+      // Create default collection if none exists
+      if bookmarkCollections.isEmpty {
+        print("[DEBUG] No collections found, creating default collection")
+        try await createDefaultBookmarkCollection()
+      }
+    } catch {
+      print("[ERROR] Failed to fetch bookmark collections: \(error)")
+      self.error = error
+      showError = true
+    }
+  }
+
+  func createBookmarkCollection() async {
+    print("[DEBUG] createBookmarkCollection - Starting")
+    print("[DEBUG] newCollectionName: \(newCollectionName)")
+
+    guard !newCollectionName.isEmpty else {
+      print("[WARNING] Attempted to create collection with empty name")
+      return
+    }
+
+    do {
+      let collection = BookmarkCollection(
+        name: newCollectionName,
+        userId: userId,
+        isDefault: false,
+        videos: []
+      )
+
+      print("[DEBUG] Creating collection at path: users/\(userId)/bookmarkCollections")
+      try await db.collection("users")
+        .document(userId)
+        .collection("bookmarkCollections")
+        .addDocument(data: try Firestore.Encoder().encode(collection))
+
+      await fetchBookmarkCollections()
+      newCollectionName = ""
+      showCreateCollectionSheet = false
+
+    } catch {
+      print("[ERROR] Failed to create bookmark collection: \(error)")
+      self.error = error
+      showError = true
+    }
+  }
+
+  private func createDefaultBookmarkCollection() async throws {
+    print("[DEBUG] createDefaultBookmarkCollection - Starting")
+    let defaultCollection = BookmarkCollection(
+      name: "All Bookmarks",
+      userId: userId,
+      isDefault: true,
+      videos: []
+    )
+
+    print("[DEBUG] Creating default collection at path: users/\(userId)/bookmarkCollections")
+    try await db.collection("users")
+      .document(userId)
+      .collection("bookmarkCollections")
+      .addDocument(data: try Firestore.Encoder().encode(defaultCollection))
+  }
+
+  func deleteBookmarkCollection(_ collection: BookmarkCollection) async {
+    guard !collection.isDefault,
+      let collectionId = collection.id
+    else { return }
+
+    do {
+      try await db.collection("users")
+        .document(userId)
+        .collection("bookmarkCollections")
+        .document(collectionId)
+        .delete()
+
+      await fetchBookmarkCollections()
+    } catch {
+      self.error = error
+      showError = true
+    }
+  }
+
+  func toggleFollow() async {
+    guard let targetUser = user,
+      let targetUserId = targetUser.id,
+      let currentUserId = Auth.auth().currentUser?.uid
+    else {
+      errorMessage = "Unable to update follow status"
+      showError = true
+      return
+    }
+
+    do {
+      if targetUser.isPrivate && !isFollowing {
+        // Send follow request
+        if !followRequestSent {
+          try await db.collection("followRequests").addDocument(data: [
+            "requesterId": currentUserId,
+            "targetId": targetUserId,
+            "timestamp": FieldValue.serverTimestamp(),
+          ])
+          followRequestSent = true
+        } else {
+          // Cancel follow request
+          let request = try await db.collection("followRequests")
+            .whereField("requesterId", isEqualTo: currentUserId)
+            .whereField("targetId", isEqualTo: targetUserId)
+            .getDocuments()
+
+          if let requestDoc = request.documents.first {
+            try await requestDoc.reference.delete()
+            followRequestSent = false
+          }
+        }
+      } else {
+        if isFollowing {
+          // Unfollow
+          let followDoc = try await db.collection("follows")
+            .whereField("followerId", isEqualTo: currentUserId)
+            .whereField("followedId", isEqualTo: targetUserId)
+            .getDocuments()
+
+          if let doc = followDoc.documents.first {
+            try await doc.reference.delete()
+            isFollowing = false
+          }
+        } else {
+          // Follow
+          try await db.collection("follows").addDocument(data: [
+            "followerId": currentUserId,
+            "followedId": targetUserId,
+            "timestamp": FieldValue.serverTimestamp(),
+          ])
+          isFollowing = true
+        }
+      }
+    } catch {
+      errorMessage = "Failed to update follow status"
+      showError = true
+    }
+  }
+}

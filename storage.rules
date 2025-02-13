@@ -1,0 +1,27 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Base function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Videos and their thumbnails
+    match /videos/{videoId}/{filename} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    // User-specific files (profile images, etc)
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Deny access to all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+} 
