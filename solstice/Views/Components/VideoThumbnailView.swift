@@ -3,7 +3,7 @@ import SwiftUI
 struct VideoThumbnailView: View {
   let video: Video
   let fixedHeight: CGFloat?
-  
+
   init(video: Video, fixedHeight: CGFloat? = nil) {
     self.video = video
     self.fixedHeight = fixedHeight
@@ -22,7 +22,7 @@ struct VideoThumbnailView: View {
         }
         .frame(
           width: geometry.size.width,
-          height: fixedHeight ?? geometry.size.width * (16/9)
+          height: fixedHeight ?? geometry.size.width * (16 / 9)
         )
         .clipped()
         .contentShape(Rectangle())
@@ -30,7 +30,7 @@ struct VideoThumbnailView: View {
         // Video Info Overlay
         VStack(alignment: .leading, spacing: 4) {
           Spacer()
-          
+
           HStack {
             // Duration
             Text(formatDuration(video.duration))
@@ -39,9 +39,9 @@ struct VideoThumbnailView: View {
               .padding(.vertical, 2)
               .background(.ultraThinMaterial)
               .cornerRadius(2)
-            
+
             Spacer()
-            
+
             // View Count
             HStack(spacing: 2) {
               Image(systemName: "eye.fill")
@@ -59,7 +59,7 @@ struct VideoThumbnailView: View {
         }
       }
     }
-    .aspectRatio(9/16, contentMode: .fit) // Force portrait aspect ratio for grid
+    .aspectRatio(9 / 16, contentMode: .fit)  // Force portrait aspect ratio for grid
   }
 
   private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -67,7 +67,7 @@ struct VideoThumbnailView: View {
     let remainingSeconds = Int(seconds) % 60
     return String(format: "%d:%02d", minutes, remainingSeconds)
   }
-  
+
   private func formatCount(_ count: Int) -> String {
     if count >= 1_000_000 {
       return String(format: "%.1fM", Double(count) / 1_000_000)
@@ -81,13 +81,13 @@ struct VideoThumbnailView: View {
 struct VideoGrid: View {
   let videos: [Video]
   let onVideoTap: (Video) -> Void
-  
+
   var body: some View {
     LazyVGrid(
       columns: [
         GridItem(.flexible(), spacing: 1),
         GridItem(.flexible(), spacing: 1),
-        GridItem(.flexible(), spacing: 1)
+        GridItem(.flexible(), spacing: 1),
       ],
       spacing: 1
     ) {
@@ -96,7 +96,7 @@ struct VideoGrid: View {
           onVideoTap(video)
         } label: {
           VideoThumbnailView(video: video)
-            .aspectRatio(9/16, contentMode: .fill)
+            .aspectRatio(9 / 16, contentMode: .fill)
         }
       }
     }
@@ -124,7 +124,7 @@ struct VideoGrid: View {
         thumbnailURL: "https://example.com/thumbnail2.jpg",
         duration: 45,
         hashtags: ["test"]
-      )
+      ),
     ],
     onVideoTap: { _ in }
   )

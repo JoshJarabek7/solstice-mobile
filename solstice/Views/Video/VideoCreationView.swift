@@ -8,13 +8,13 @@ struct VideoCreationView: View {
   @StateObject private var viewModel = VideoCreationViewModel()
   @FocusState private var isCaptionFocused: Bool
   @Environment(\.dismiss) private var dismiss
-  
+
   var body: some View {
     NavigationStack {
       ZStack {
         Color(.systemBackground)
           .ignoresSafeArea()
-        
+
         if let player = viewModel.player {
           ScrollView {
             VStack(spacing: 16) {
@@ -24,7 +24,7 @@ struct VideoCreationView: View {
                 .frame(height: UIScreen.main.bounds.height * 0.5)
                 .cornerRadius(12)
                 .shadow(radius: 8)
-              
+
               // Video Trimmer
               if viewModel.duration > 0 {
                 VideoTrimmer(
@@ -33,21 +33,21 @@ struct VideoCreationView: View {
                   endTime: $viewModel.endTime
                 )
                 .padding(.horizontal)
-                
+
                 Text("Trim your video")
                   .font(.subheadline)
                   .foregroundColor(.secondary)
               }
-              
+
               // Caption
               TextField("Write a caption...", text: $viewModel.caption, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .frame(height: 80)
                 .padding(.horizontal)
                 .focused($isCaptionFocused)
-              
+
               Spacer()
-              
+
               // Upload Progress
               if viewModel.isUploading {
                 VStack(spacing: 8) {
@@ -55,14 +55,14 @@ struct VideoCreationView: View {
                     .progressViewStyle(.linear)
                     .tint(.blue)
                     .padding(.horizontal)
-                  
+
                   Text(viewModel.processingStatus)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 }
                 .padding(.bottom, 16)
               }
-              
+
               // Post Button
               Button {
                 Task {
@@ -91,7 +91,7 @@ struct VideoCreationView: View {
           .onTapGesture {
             isCaptionFocused = false
           }
-          
+
         } else {
           // Video Selection
           PhotosPicker(
@@ -103,10 +103,10 @@ struct VideoCreationView: View {
               Image(systemName: "video.badge.plus")
                 .font(.system(size: 50))
                 .foregroundColor(.blue)
-              
+
               Text("Select a video to share")
                 .font(.headline)
-              
+
               Text("Videos can be up to 2 minutes long")
                 .font(.subheadline)
                 .foregroundColor(.secondary)

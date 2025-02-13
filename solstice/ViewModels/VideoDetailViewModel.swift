@@ -34,14 +34,14 @@ final class VideoDetailViewModel: ObservableObject {
       if var data = snapshot.data() {
         // Set the ID before decoding
         data["id"] = creatorId
-        
+
         // Handle nested ageRange structure
         if let ageRange = data["ageRange"] as? [String: Any] {
           data["ageRange.min"] = ageRange["min"] as? Int ?? 18
           data["ageRange.max"] = ageRange["max"] as? Int ?? 100
           data.removeValue(forKey: "ageRange")
         }
-        
+
         // Handle boolean fields
         for field in ["isDatingEnabled", "isPrivate"] {
           if let value = data[field] {
@@ -52,14 +52,14 @@ final class VideoDetailViewModel: ObservableObject {
             }
           }
         }
-        
+
         // Handle arrays
         if let datingImages = data["datingImages"] as? [String] {
           data["datingImages"] = datingImages
         } else {
           data["datingImages"] = [String]()
         }
-        
+
         // Handle timestamps
         if let timestamp = data["createdAt"] as? Timestamp {
           data["createdAt"] = timestamp.dateValue()
@@ -116,33 +116,33 @@ final class VideoDetailViewModel: ObservableObject {
 
   func toggleLike(videoId: String) async throws {
     guard let currentUserId = currentUserId else { return }
-    
+
     // Capture current state
     let wasLiked = isLiked
-    
+
     do {
       // Perform Firebase operations first
       let likeRef = db.collection("videos")
         .document(videoId)
         .collection("likes")
         .document(currentUserId)
-      
+
       let videoRef = db.collection("videos").document(videoId)
-      
+
       // Verify video exists before proceeding
       let videoDoc = try await videoRef.getDocument()
       guard videoDoc.exists else {
         self.errorMessage = "Video not found"
         return
       }
-      
+
       if wasLiked {
         // Unlike
         try await likeRef.delete()
         try await videoRef.updateData([
           "likes": FieldValue.increment(Int64(-1))
         ])
-        
+
         // Update UI after successful server operation
         await MainActor.run {
           self.isLiked = false
@@ -152,12 +152,12 @@ final class VideoDetailViewModel: ObservableObject {
         // Like
         try await likeRef.setData([
           "timestamp": FieldValue.serverTimestamp(),
-          "userId": currentUserId
+          "userId": currentUserId,
         ])
         try await videoRef.updateData([
           "likes": FieldValue.increment(Int64(1))
         ])
-        
+
         // Update UI after successful server operation
         await MainActor.run {
           self.isLiked = true
@@ -196,15 +196,15 @@ final class VideoDetailViewModel: ObservableObject {
 
   func addComment(videoId: String, text: String) async throws {
     guard let currentUserId = currentUserId else { return }
-    
+
     let user = try await db.collection("users")
       .document(currentUserId)
       .getDocument()
-    
+
     let userData = user.data()
     let username = userData?["username"] as? String ?? "Unknown"
     let profileImageURL = userData?["profileImageURL"] as? String
-    
+
     let commentRef = db.collection("videos")
       .document(videoId)
       .collection("comments")
@@ -219,7 +219,7 @@ final class VideoDetailViewModel: ObservableObject {
     )
 
     try commentRef.setData(from: comment)
-    
+
     // Update video's comment count
     try await db.collection("videos")
       .document(videoId)
@@ -243,7 +243,7 @@ final class VideoDetailViewModel: ObservableObject {
         .getDocuments()
 
       var fetchedComments: [Comment] = []
-      
+
       for doc in snapshot.documents {
         if var comment = try? doc.data(as: Comment.self) {
           // Check if the current user has liked this comment
@@ -255,13 +255,13 @@ final class VideoDetailViewModel: ObservableObject {
               .collection("likes")
               .document(currentUserId)
               .getDocument()
-            
+
             comment.isLiked = likeDoc?.exists ?? false
           }
           fetchedComments.append(comment)
         }
       }
-      
+
       await MainActor.run {
         self.comments = fetchedComments
       }
@@ -272,24 +272,24 @@ final class VideoDetailViewModel: ObservableObject {
 
   func toggleCommentLike(videoId: String, commentId: String) async throws {
     guard let currentUserId = currentUserId else { return }
-    
+
     let commentRef = db.collection("videos")
       .document(videoId)
       .collection("comments")
       .document(commentId)
-    
+
     let likeRef = commentRef.collection("likes").document(currentUserId)
-    
+
     // Get current comment
     guard let commentIndex = comments.firstIndex(where: { $0.id == commentId }) else { return }
     let wasLiked = comments[commentIndex].isLiked ?? false
-    
+
     // Optimistically update UI
     await MainActor.run {
       comments[commentIndex].isLiked?.toggle()
       comments[commentIndex].likes += wasLiked ? -1 : 1
     }
-    
+
     do {
       if wasLiked {
         // Unlike
@@ -301,7 +301,7 @@ final class VideoDetailViewModel: ObservableObject {
         // Like
         try await likeRef.setData([
           "timestamp": FieldValue.serverTimestamp(),
-          "userId": currentUserId
+          "userId": currentUserId,
         ])
         try await commentRef.updateData([
           "likes": FieldValue.increment(Int64(1))

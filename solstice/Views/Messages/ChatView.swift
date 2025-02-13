@@ -382,48 +382,50 @@ struct ChatView: View {
 
   private func sendMessage(_ content: String, replyingTo: Message? = nil) async throws {
     // Create message with document ID
-    let messageRef = Firestore.firestore().collection("chats").document(chat.id ?? "").collection("messages").document()
+    let messageRef = Firestore.firestore().collection("chats").document(chat.id ?? "").collection(
+      "messages"
+    ).document()
     let message = Message(
-        id: messageRef.documentID,
-        senderId: viewModel.currentUserId,
-        content: content,
-        timestamp: Date(),
-        type: .text,
-        replyTo: replyingTo?.id,
-        replyPreview: replyingTo.map {
-            ReplyPreview(
-                messageId: $0.id ?? "",
-                content: $0.content,
-                senderId: $0.senderId,
-                type: $0.type
-            )
-        },
-        deliveredTo: [viewModel.currentUserId]
+      id: messageRef.documentID,
+      senderId: viewModel.currentUserId,
+      content: content,
+      timestamp: Date(),
+      type: .text,
+      replyTo: replyingTo?.id,
+      replyPreview: replyingTo.map {
+        ReplyPreview(
+          messageId: $0.id ?? "",
+          content: $0.content,
+          senderId: $0.senderId,
+          type: $0.type
+        )
+      },
+      deliveredTo: [viewModel.currentUserId]
     )
 
     // Check if chat exists in Firebase
     var chatExists = false
     if let chatId = chat.id {
-        let doc = try await Firestore.firestore().collection("chats").document(chatId).getDocument()
-        chatExists = doc.exists
+      let doc = try await Firestore.firestore().collection("chats").document(chatId).getDocument()
+      chatExists = doc.exists
     }
-    
+
     if !chatExists {
-        let messagesViewModel = MessagesViewModel()
-        chat = try await messagesViewModel.createChatInFirebase(chat, firstMessage: message)
-        // Update viewModel with new chat
-        viewModel = ChatViewModel(chat: chat)
-        await viewModel.loadMessages()
-        
-        // Refresh the messages list
-        Task {
-            await messagesViewModel.loadChats()
-        }
+      let messagesViewModel = MessagesViewModel()
+      chat = try await messagesViewModel.createChatInFirebase(chat, firstMessage: message)
+      // Update viewModel with new chat
+      viewModel = ChatViewModel(chat: chat)
+      await viewModel.loadMessages()
+
+      // Refresh the messages list
+      Task {
+        await messagesViewModel.loadChats()
+      }
     } else {
-        // Chat exists, just add the message
-        try await viewModel.addMessage(to: chat, message: message)
+      // Chat exists, just add the message
+      try await viewModel.addMessage(to: chat, message: message)
     }
-    
+
     messageText = ""
     self.replyingTo = nil
     await viewModel.updateTypingStatus(isTyping: false)
@@ -511,7 +513,7 @@ struct MessageBubble: View {
 
 struct VideoMessagePreview: View {
   let metadata: MessageMetadata?
-  
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       // Video Creator Info
@@ -524,7 +526,7 @@ struct VideoMessagePreview: View {
             .foregroundColor(.gray)
         }
       }
-      
+
       // Video Thumbnail with Play Button
       if let thumbnailURL = metadata?.videoThumbnail {
         ZStack {
@@ -546,7 +548,7 @@ struct VideoMessagePreview: View {
           }
           .frame(height: 200)
           .clipShape(RoundedRectangle(cornerRadius: 12))
-          
+
           // Play Button Overlay
           Image(systemName: "play.circle.fill")
             .font(.system(size: 44))
@@ -554,7 +556,7 @@ struct VideoMessagePreview: View {
             .shadow(radius: 2)
         }
       }
-      
+
       // Video Caption
       if let caption = metadata?.videoCaption {
         Text(caption)
@@ -839,17 +841,17 @@ class ChatViewModel {
       print("[ERROR] Invalid chat ID")
       return
     }
-    
+
     // Clean up existing listeners
     listener?.remove()
     typingListener?.remove()
-    
+
     // Set up typing listener
     typingListener = db.collection("chats").document(chatId)
       .addSnapshotListener { [weak self] snapshot, error in
         guard let self = self,
-              let data = snapshot?.data(),
-              let typingUsers = data["typingUsers"] as? [String]
+          let data = snapshot?.data(),
+          let typingUsers = data["typingUsers"] as? [String]
         else {
           if let error = error {
             print("[ERROR] Typing listener error: \(error)")
@@ -858,59 +860,62 @@ class ChatViewModel {
         }
         self.typingUsers = typingUsers
       }
-    
+
     // Set up messages listener with proper error handling
     let messagesQuery = db.collection("chats")
       .document(chatId)
       .collection("messages")
       .order(by: "timestamp", descending: false)
-    
+
     let eventsQuery = db.collection("chats")
       .document(chatId)
       .collection("events")
       .order(by: "timestamp", descending: false)
-    
+
     listener = messagesQuery.addSnapshotListener { [weak self] messageSnapshot, error in
       guard let self = self else { return }
-      
+
       if let error = error {
         print("[ERROR] Failed to load messages: \(error)")
         self.error = error
         return
       }
-      
+
       Task {
         do {
           // Process messages with improved error handling
-          let messages = messageSnapshot?.documents.compactMap { document -> Message? in
-            do {
-              let data = document.data()
-              print("[DEBUG] Processing message document: \(data)")
-              
-              let decoder = Firestore.Decoder()
-              decoder.userInfo[.documentDataKey] = data
-              
-              let message = try document.data(as: Message.self, decoder: decoder)
-              print("[DEBUG] Successfully decoded message: \(message.id ?? "unknown") - \(message.content)")
-              return message
-            } catch {
-              print("[ERROR] Failed to decode message: \(error)")
-              return nil
-            }
-          } ?? []
-          
+          let messages =
+            messageSnapshot?.documents.compactMap { document -> Message? in
+              do {
+                let data = document.data()
+                print("[DEBUG] Processing message document: \(data)")
+
+                let decoder = Firestore.Decoder()
+                decoder.userInfo[.documentDataKey] = data
+
+                let message = try document.data(as: Message.self, decoder: decoder)
+                print(
+                  "[DEBUG] Successfully decoded message: \(message.id ?? "unknown") - \(message.content)"
+                )
+                return message
+              } catch {
+                print("[ERROR] Failed to decode message: \(error)")
+                return nil
+              }
+            } ?? []
+
           print("[DEBUG] Successfully decoded \(messages.count) messages")
-          
+
           // Process events
           let eventSnapshot = try await eventsQuery.getDocuments()
           let events = eventSnapshot.documents.compactMap { document -> ChatEvent? in
             do {
               let data = document.data()
               print("[DEBUG] Processing event document: \(data)")
-              
+
               let decoder = Firestore.Decoder()
               decoder.userInfo[.documentDataKey] = data
-              
+
               let event = try document.data(as: ChatEvent.self, decoder: decoder)
               print("[DEBUG] Successfully decoded event: \(event.id ?? "unknown")")
               return event
@@ -919,14 +924,14 @@ class ChatViewModel {
               return nil
             }
           }
-          
+
           print("[DEBUG] Found \(events.count) chat events")
-          
+
           // Combine and sort items
           var items: [ChatItem] = []
           items += messages.map { ChatItem.message($0) }
           items += events.map { ChatItem.event($0) }
-          
+
           items.sort { item1, item2 in
             switch (item1, item2) {
             case (.message(let message1), .message(let message2)):
@@ -939,21 +944,21 @@ class ChatViewModel {
               return event.timestamp < message.timestamp
             }
           }
-          
+
           print("[DEBUG] Total chat items after sorting: \(items.count)")
-          
+
           // Update UI state
           await MainActor.run {
             self.messagesAndEvents = items
           }
-          
+
         } catch {
           print("[ERROR] Error processing messages and events: \(error)")
           self.error = error
         }
       }
     }
-    
+
     // Handle read status and unread count
     do {
       let chatDoc = try await db.collection("chats").document(chatId).getDocument()
@@ -961,36 +966,40 @@ class ChatViewModel {
         Task {
           do {
             // Get unread messages from the last 30 days
-            let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            let thirtyDaysAgo =
+              Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
             let unreadMessages = try await db.collection("chats")
               .document(chatId)
               .collection("messages")
               .whereField("timestamp", isGreaterThan: Timestamp(date: thirtyDaysAgo))
               .getDocuments()
-            
+
             // Batch update for marking messages as read
             let batch = db.batch()
             var hasUnreadMessages = false
-            
+
             for doc in unreadMessages.documents {
               let data = doc.data()
               if let senderId = data["senderId"] as? String,
-                 senderId != currentUserId,
-                 let readBy = data["readBy"] as? [String],
-                 !readBy.contains(currentUserId) {
+                senderId != currentUserId,
+                let readBy = data["readBy"] as? [String],
+                !readBy.contains(currentUserId)
+              {
                 hasUnreadMessages = true
-                batch.updateData([
-                  "readBy": FieldValue.arrayUnion([currentUserId])
-                ], forDocument: doc.reference)
+                batch.updateData(
+                  [
+                    "readBy": FieldValue.arrayUnion([currentUserId])
+                  ], forDocument: doc.reference)
               }
             }
-            
+
             if hasUnreadMessages {
               // Reset unread count for current user
-              batch.updateData([
-                "unreadCounts.\(currentUserId)": 0
-              ], forDocument: db.collection("chats").document(chatId))
-              
+              batch.updateData(
+                [
+                  "unreadCounts.\(currentUserId)": 0
+                ], forDocument: db.collection("chats").document(chatId))
+
               try await batch.commit()
             }
           } catch {
@@ -1083,7 +1092,9 @@ class ChatViewModel {
     cancelTypingTimer()
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
-      self.typingTimer = Timer.scheduledTimer(withTimeInterval: self.typingDebounceTime, repeats: false) { [weak self] _ in
+      self.typingTimer = Timer.scheduledTimer(
+        withTimeInterval: self.typingDebounceTime, repeats: false
+      ) { [weak self] _ in
         Task { [weak self] in
           await self?.updateTypingStatus(isTyping: false)
         }
@@ -1093,15 +1104,15 @@ class ChatViewModel {
 
   func updateTypingStatus(isTyping: Bool) async {
     guard let chatId = chat.id else { return }
-    
+
     // Always cancel the existing timer
     cancelTypingTimer()
-    
+
     do {
       // First check if the chat document exists
       let chatDoc = try await db.collection("chats").document(chatId).getDocument()
       guard chatDoc.exists else { return }
-      
+
       if isTyping {
         try await db.collection("chats").document(chatId).updateData([
           "typingUsers": FieldValue.arrayUnion([currentUserId])
@@ -1130,52 +1141,52 @@ class ChatViewModel {
   func addMessage(to chat: Chat, message: Message) async throws {
     guard let chatId = chat.id else { throw ChatError.invalidChat }
     guard let messageId = message.id else { throw ChatError.invalidMessage }
-    
+
     // Create message document with the provided ID
     let messageRef = db.collection("chats")
-        .document(chatId)
-        .collection("messages")
-        .document(messageId)
-    
+      .document(chatId)
+      .collection("messages")
+      .document(messageId)
+
     let messageData: [String: Any] = [
-        "id": messageId,
-        "content": message.content,
-        "senderId": message.senderId,
-        "timestamp": Timestamp(date: message.timestamp),
-        "type": message.type.rawValue,
-        "readBy": [message.senderId],
-        "deliveredTo": [message.senderId],
-        "reactions": [:],
-        "metadata": message.metadata?.asDictionary() ?? NSNull(),
-        "replyTo": message.replyTo as Any,
-        "replyPreview": message.replyPreview?.asDictionary() as Any
+      "id": messageId,
+      "content": message.content,
+      "senderId": message.senderId,
+      "timestamp": Timestamp(date: message.timestamp),
+      "type": message.type.rawValue,
+      "readBy": [message.senderId],
+      "deliveredTo": [message.senderId],
+      "reactions": [:],
+      "metadata": message.metadata?.asDictionary() ?? NSNull(),
+      "replyTo": message.replyTo as Any,
+      "replyPreview": message.replyPreview?.asDictionary() as Any,
     ]
-    
+
     // Batch write to ensure atomicity
     let batch = db.batch()
-    
+
     // Add message
     batch.setData(messageData, forDocument: messageRef)
-    
+
     // Update chat document
     let chatRef = db.collection("chats").document(chatId)
     var chatUpdateData: [String: Any] = [
-        "lastMessage": messageData,
-        "lastActivity": Timestamp(date: Date()),
-        "unreadCounts.\(currentUserId)": 0
+      "lastMessage": messageData,
+      "lastActivity": Timestamp(date: Date()),
+      "unreadCounts.\(currentUserId)": 0,
     ]
-    
+
     // Update unread counts for other participants
     let otherParticipantIds = chat.participants
-        .compactMap { $0.id }
-        .filter { $0 != currentUserId }
-    
+      .compactMap { $0.id }
+      .filter { $0 != currentUserId }
+
     for participantId in otherParticipantIds {
-        chatUpdateData["unreadCounts.\(participantId)"] = FieldValue.increment(Int64(1))
+      chatUpdateData["unreadCounts.\(participantId)"] = FieldValue.increment(Int64(1))
     }
-    
+
     batch.updateData(chatUpdateData, forDocument: chatRef)
-    
+
     // Commit the batch
     try await batch.commit()
   }

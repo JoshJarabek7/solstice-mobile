@@ -21,14 +21,20 @@ struct User: Identifiable, Codable, Equatable, Hashable {
   var followingCount: Int = 0
   var createdAt: Date = Date()
   var datingImages: [String] = []  // URLs, max 5
+  var birthday: Date?  // New field for birthday
 
   // Computed properties for search
   var username_lowercase: String {
     username.lowercased()
   }
-  
+
   var fullName_lowercase: String {
     fullName.lowercased()
+  }
+
+  var age: Int? {
+    guard let birthday = birthday else { return nil }
+    return Calendar.current.dateComponents([.year], from: birthday, to: Date()).year
   }
 
   var ageRange: ClosedRange<Int> {
@@ -58,7 +64,8 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     followersCount: Int = 0,
     followingCount: Int = 0,
     createdAt: Date = Date(),
-    datingImages: [String] = []
+    datingImages: [String] = [],
+    birthday: Date? = nil
   ) {
     self.username = username
     self.email = email
@@ -77,6 +84,7 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     self.followingCount = followingCount
     self.createdAt = createdAt
     self.datingImages = datingImages
+    self.birthday = birthday
   }
 
   enum Gender: String, Codable, CaseIterable, Identifiable {
@@ -109,6 +117,7 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     case datingImages
     case username_lowercase
     case fullName_lowercase
+    case birthday
   }
 
   init(from decoder: Decoder) throws {
@@ -126,8 +135,12 @@ struct User: Identifiable, Codable, Equatable, Hashable {
 
     // Decode optional fields with default values
     self.bio = try container.decodeIfPresent(String.self, forKey: .bio)
-    self.isPrivate = try container.decodeIfPresent(Bool.self, forKey: .isPrivate) ?? (defaults["isPrivate"] as? Bool ?? false)
-    self.isDatingEnabled = try container.decodeIfPresent(Bool.self, forKey: .isDatingEnabled) ?? (defaults["isDatingEnabled"] as? Bool ?? false)
+    self.isPrivate =
+      try container.decodeIfPresent(Bool.self, forKey: .isPrivate)
+      ?? (defaults["isPrivate"] as? Bool ?? false)
+    self.isDatingEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .isDatingEnabled)
+      ?? (defaults["isDatingEnabled"] as? Bool ?? false)
     self.profileImageURL = try container.decodeIfPresent(String.self, forKey: .profileImageURL)
     self.location = try container.decodeIfPresent(GeoPoint.self, forKey: .location)
 
@@ -140,12 +153,24 @@ struct User: Identifiable, Codable, Equatable, Hashable {
       self.interestedIn = []
     }
 
-    self.maxDistance = try container.decodeIfPresent(Double.self, forKey: .maxDistance) ?? (defaults["maxDistance"] as? Double ?? 50.0)
-    self.ageRangeMin = try container.decodeIfPresent(Int.self, forKey: .ageRangeMin) ?? (defaults["ageRangeMin"] as? Int ?? 18)
-    self.ageRangeMax = try container.decodeIfPresent(Int.self, forKey: .ageRangeMax) ?? (defaults["ageRangeMax"] as? Int ?? 100)
-    self.followersCount = try container.decodeIfPresent(Int.self, forKey: .followersCount) ?? (defaults["followersCount"] as? Int ?? 0)
-    self.followingCount = try container.decodeIfPresent(Int.self, forKey: .followingCount) ?? (defaults["followingCount"] as? Int ?? 0)
-    self.datingImages = try container.decodeIfPresent([String].self, forKey: .datingImages) ?? (defaults["datingImages"] as? [String] ?? [])
+    self.maxDistance =
+      try container.decodeIfPresent(Double.self, forKey: .maxDistance)
+      ?? (defaults["maxDistance"] as? Double ?? 50.0)
+    self.ageRangeMin =
+      try container.decodeIfPresent(Int.self, forKey: .ageRangeMin)
+      ?? (defaults["ageRangeMin"] as? Int ?? 18)
+    self.ageRangeMax =
+      try container.decodeIfPresent(Int.self, forKey: .ageRangeMax)
+      ?? (defaults["ageRangeMax"] as? Int ?? 100)
+    self.followersCount =
+      try container.decodeIfPresent(Int.self, forKey: .followersCount)
+      ?? (defaults["followersCount"] as? Int ?? 0)
+    self.followingCount =
+      try container.decodeIfPresent(Int.self, forKey: .followingCount)
+      ?? (defaults["followingCount"] as? Int ?? 0)
+    self.datingImages =
+      try container.decodeIfPresent([String].self, forKey: .datingImages)
+      ?? (defaults["datingImages"] as? [String] ?? [])
 
     // Handle createdAt with default value
     if let timestamp = try? container.decode(Timestamp.self, forKey: .createdAt) {
@@ -184,6 +209,7 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     try container.encode(datingImages, forKey: .datingImages)
     try container.encode(username_lowercase, forKey: .username_lowercase)
     try container.encode(fullName_lowercase, forKey: .fullName_lowercase)
+    try container.encode(birthday, forKey: .birthday)
   }
 
   func hash(into hasher: inout Hasher) {

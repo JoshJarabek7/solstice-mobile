@@ -2,58 +2,69 @@ import FirebaseAuth
 import SwiftUI
 
 struct SettingsView: View {
-  @Bindable var userViewModel: UserViewModel
+  @Environment(UserViewModel.self) private var userViewModel
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var authViewModel: AuthViewModel
 
   var body: some View {
     NavigationView {
       List {
-        Section("Profile") {
-          NavigationLink(destination: ProfileEditView(userViewModel: userViewModel)) {
+        // Profile Section
+        Section(header: Text("Profile").textCase(.none)) {
+          NavigationLink(destination: ProfileEditView()) {
             Label("Edit Profile", systemImage: "person.circle")
           }
 
-          Toggle(isOn: $userViewModel.user.isPrivate) {
-            Label("Private Account", systemImage: "lock")
-          }
-          .onChange(of: userViewModel.user.isPrivate) { oldValue, newValue in
-            Task {
-              do {
-                try await userViewModel.updateUser()
-              } catch {
-                print("Error updating privacy setting: \(error)")
-                userViewModel.user.isPrivate = oldValue
+          Toggle(
+            isOn: Binding(
+              get: { userViewModel.user.isPrivate },
+              set: { newValue in
+                userViewModel.user.isPrivate = newValue
+                Task {
+                  do {
+                    try await userViewModel.updateUser()
+                  } catch {
+                    print("Error updating privacy setting: \(error)")
+                    userViewModel.user.isPrivate = !newValue
+                  }
+                }
               }
-            }
+            )
+          ) {
+            Label("Private Account", systemImage: "lock")
           }
         }
 
-        Section("Dating") {
-          Toggle(isOn: $userViewModel.user.isDatingEnabled) {
-            Label("Enable Dating", systemImage: "heart")
-          }
-          .onChange(of: userViewModel.user.isDatingEnabled) { oldValue, newValue in
-            Task {
-              do {
-                try await userViewModel.updateUser()
-              } catch {
-                print("Error updating dating status: \(error)")
-                userViewModel.user.isDatingEnabled = oldValue
+        // Dating Section
+        Section(header: Text("Dating").textCase(.none)) {
+          Toggle(
+            isOn: Binding(
+              get: { userViewModel.user.isDatingEnabled },
+              set: { newValue in
+                userViewModel.user.isDatingEnabled = newValue
+                Task {
+                  do {
+                    try await userViewModel.updateUser()
+                  } catch {
+                    print("Error updating dating status: \(error)")
+                    userViewModel.user.isDatingEnabled = !newValue
+                  }
+                }
               }
-            }
+            )
+          ) {
+            Label("Enable Dating", systemImage: "heart")
           }
 
           if userViewModel.user.isDatingEnabled {
-            NavigationLink(
-              destination: DatingSettingsView(viewModel: userViewModel)
-            ) {
+            NavigationLink(destination: DatingSettingsView()) {
               Label("Dating Settings", systemImage: "heart.circle")
             }
           }
         }
 
-        Section("Account") {
+        // Account Section
+        Section(header: Text("Account").textCase(.none)) {
           Button(role: .destructive) {
             Task {
               // Sign out through AuthViewModel first
@@ -71,10 +82,11 @@ struct SettingsView: View {
       }
       .navigationTitle("Settings")
     }
-    .environmentObject(authViewModel)
   }
 }
 
 #Preview {
-  SettingsView(userViewModel: UserViewModel())
+  SettingsView()
+    .environment(UserViewModel())
+    .environmentObject(AuthViewModel())
 }

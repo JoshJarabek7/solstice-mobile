@@ -7,7 +7,7 @@ struct PhotoViewer: View {
   @State private var offset = CGSize.zero
   @State private var lastScale: CGFloat = 1.0
   @GestureState private var dragState = CGSize.zero
-  
+
   var body: some View {
     GeometryReader { geometry in
       ZStack {
@@ -15,7 +15,7 @@ struct PhotoViewer: View {
         Color.black
           .ignoresSafeArea()
           .opacity(1.0 - Double(abs(offset.height)) / 500.0)
-        
+
         // Image
         AsyncImage(url: URL(string: imageURL)) { image in
           image
@@ -61,7 +61,7 @@ struct PhotoViewer: View {
               width: offset.width + value.translation.width,
               height: offset.height + value.translation.height
             )
-            
+
             let dismissThreshold = geometry.size.height * 0.2
             if abs(offset.height) > dismissThreshold {
               isPresented = false
@@ -109,14 +109,14 @@ struct PhotoCarouselViewer: View {
   let initialIndex: Int
   @Binding var isPresented: Bool
   @State private var currentIndex: Int
-  
+
   init(images: [String], initialIndex: Int = 0, isPresented: Binding<Bool>) {
     self.images = images
     self.initialIndex = initialIndex
     self._isPresented = isPresented
     self._currentIndex = State(initialValue: initialIndex)
   }
-  
+
   var body: some View {
     TabView(selection: $currentIndex) {
       ForEach(images.indices, id: \.self) { index in
@@ -134,8 +134,8 @@ struct PhotoCarouselViewer: View {
   PhotoCarouselViewer(
     images: [
       "https://example.com/photo1.jpg",
-      "https://example.com/photo2.jpg"
+      "https://example.com/photo2.jpg",
     ],
     isPresented: .constant(true)
   )
-} 
+}

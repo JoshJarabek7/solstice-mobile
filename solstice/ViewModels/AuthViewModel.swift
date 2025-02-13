@@ -108,7 +108,8 @@ class AuthViewModel: ObservableObject {
       interestedIn: [],
       maxDistance: 50,
       ageRangeMin: 18,
-      ageRangeMax: 100
+      ageRangeMax: 100,
+      birthday: nil
     )
   }
 
@@ -167,6 +168,9 @@ class AuthViewModel: ObservableObject {
         "followingCount": 0,
         "createdAt": FieldValue.serverTimestamp(),
         "datingImages": [],
+        "birthday": nil as Any?,  // Add birthday field
+        "username_lowercase": user.username.lowercased(),
+        "fullName_lowercase": user.fullName.lowercased(),
       ]
 
       do {

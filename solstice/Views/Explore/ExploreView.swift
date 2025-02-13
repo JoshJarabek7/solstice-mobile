@@ -132,7 +132,9 @@ struct ExploreView: View {
           ], spacing: 1
         ) {
           ForEach(viewModel.trendingVideos) { video in
-            NavigationLink(destination: VideoDetailView(video: video, videos: viewModel.trendingVideos)) {
+            NavigationLink(
+              destination: VideoDetailView(video: video, videos: viewModel.trendingVideos)
+            ) {
               VideoThumbnailView(video: video)
                 .aspectRatio(9 / 16, contentMode: .fill)
             }

@@ -13,7 +13,7 @@ struct VideoDetailView: View {
   @State private var scrollPosition: Int?
   @State private var showProfile = false
   @State private var selectedUserId: String?
-  
+
   init(video: Video, videos: [Video] = []) {
     self.initialVideo = video
     self.videos = videos.isEmpty ? [video] : videos
@@ -43,17 +43,18 @@ struct VideoDetailView: View {
               height: UIScreen.main.bounds.height
             )
             .background(Color.black)
-            
+
             // Overlay Controls
             VStack {
               Spacer()
-              
+
               // Right-side action buttons
               HStack {
                 // Left side - Caption and creator info
                 VStack(alignment: .leading, spacing: 8) {
                   // Creator info
-                  if let creator = viewModel.creator, let creatorId = creator.id, !creatorId.isEmpty {
+                  if let creator = viewModel.creator, let creatorId = creator.id, !creatorId.isEmpty
+                  {
                     NavigationLink {
                       ProfileViewContainer(userId: creatorId)
                     } label: {
@@ -67,14 +68,14 @@ struct VideoDetailView: View {
                       }
                     }
                   }
-                  
+
                   // Caption
                   if let caption = videos[index].caption {
                     Text(caption)
                       .foregroundColor(.white)
                       .font(.subheadline)
                   }
-                  
+
                   // Hashtags
                   ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -92,13 +93,14 @@ struct VideoDetailView: View {
                 }
                 .padding(.leading)
                 .padding(.bottom, 60)
-                
+
                 Spacer()
-                
+
                 // Right side buttons
                 VStack(spacing: 20) {
                   // Creator Profile Picture (above like button)
-                  if let creator = viewModel.creator, let creatorId = creator.id, !creatorId.isEmpty {
+                  if let creator = viewModel.creator, let creatorId = creator.id, !creatorId.isEmpty
+                  {
                     NavigationLink {
                       ProfileViewContainer(userId: creatorId)
                     } label: {
@@ -117,7 +119,7 @@ struct VideoDetailView: View {
                       .overlay(Circle().stroke(Color.white, lineWidth: 2))
                     }
                   }
-                  
+
                   // Like Button
                   Button {
                     Task {
@@ -133,7 +135,7 @@ struct VideoDetailView: View {
                         .foregroundColor(.white)
                     }
                   }
-                  
+
                   // Comments Button
                   Button {
                     showComments = true
@@ -147,7 +149,7 @@ struct VideoDetailView: View {
                         .foregroundColor(.white)
                     }
                   }
-                  
+
                   // Share Button
                   Button {
                     showShareSheet = true
@@ -247,7 +249,7 @@ struct CommentsSheet: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.colorScheme) private var colorScheme
   @FocusState private var isInputFocused: Bool
-  
+
   var body: some View {
     VStack(spacing: 0) {
       // Header
@@ -266,9 +268,9 @@ struct CommentsSheet: View {
       .padding(.horizontal)
       .padding(.vertical, 12)
       .background(colorScheme == .dark ? Color.black : Color.white)
-      
+
       Divider()
-      
+
       // Comments List
       ScrollView {
         LazyVStack(spacing: 20) {
@@ -285,9 +287,9 @@ struct CommentsSheet: View {
         }
         .padding(.vertical)
       }
-      
+
       Divider()
-      
+
       // Comment Input
       HStack(spacing: 12) {
         TextField("Add comment...", text: $commentText)
@@ -297,7 +299,7 @@ struct CommentsSheet: View {
           .background(Color(.systemGray6))
           .cornerRadius(20)
           .focused($isInputFocused)
-        
+
         Button {
           if !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             onPostComment()
@@ -306,7 +308,8 @@ struct CommentsSheet: View {
         } label: {
           Text("Post")
             .fontWeight(.semibold)
-            .foregroundColor(!commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .blue : .gray)
+            .foregroundColor(
+              !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .blue : .gray)
         }
         .disabled(commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       }
@@ -323,7 +326,7 @@ struct CommentRow: View {
   let comment: Comment
   let onLike: (String) -> Void
   let onProfileTap: () -> Void
-  
+
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
       // Profile Image
@@ -339,7 +342,7 @@ struct CommentRow: View {
         .frame(width: 44, height: 44)
         .clipShape(Circle())
       }
-      
+
       VStack(alignment: .leading, spacing: 4) {
         // Username and Comment Text
         HStack(alignment: .top, spacing: 0) {
@@ -348,20 +351,20 @@ struct CommentRow: View {
               .font(.system(size: 14, weight: .semibold))
               .foregroundColor(.primary)
           }
-          Text("  ") +
-          Text(comment.text)
+          Text("  ")
+            + Text(comment.text)
             .font(.system(size: 14))
             .foregroundColor(.primary)
         }
-        
+
         // Timestamp
         Text(comment.timestamp.formatted(.relative(presentation: .named)))
           .font(.system(size: 13))
           .foregroundColor(.gray)
       }
-      
+
       Spacer()
-      
+
       // Like Button
       Button {
         if let commentId = comment.id {
@@ -372,7 +375,7 @@ struct CommentRow: View {
           Image(systemName: comment.isLiked == true ? "heart.fill" : "heart")
             .font(.system(size: 18))
             .foregroundColor(comment.isLiked == true ? .red : .gray)
-          
+
           if comment.likes > 0 {
             Text("\(comment.likes)")
               .font(.system(size: 12))

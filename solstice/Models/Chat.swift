@@ -55,48 +55,55 @@ struct Chat: Identifiable, Codable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     self.id = try container.decodeIfPresent(String.self, forKey: .id)
     self.participants = try container.decode([User].self, forKey: .participants)
-    
+
     // Handle lastMessage decoding
-    if let messageContainer = try? container.nestedContainer(keyedBy: MessageCodingKeys.self, forKey: .lastMessage) {
-        self.lastMessage = Message(
-            id: try? messageContainer.decode(String.self, forKey: .id),
-            senderId: try messageContainer.decode(String.self, forKey: .senderId),
-            content: try messageContainer.decode(String.self, forKey: .content),
-            timestamp: (try? messageContainer.decode(Timestamp.self, forKey: .timestamp))?.dateValue() ?? Date(),
-            type: Message.MessageType(rawValue: (try? messageContainer.decode(String.self, forKey: .type)) ?? "text") ?? .text,
-            reactions: (try? messageContainer.decode([String: [String]].self, forKey: .reactions)) ?? [:],
-            readBy: (try? messageContainer.decode([String].self, forKey: .readBy)) ?? [],
-            deliveredTo: (try? messageContainer.decode([String].self, forKey: .deliveredTo)) ?? []
-        )
+    if let messageContainer = try? container.nestedContainer(
+      keyedBy: MessageCodingKeys.self, forKey: .lastMessage)
+    {
+      self.lastMessage = Message(
+        id: try? messageContainer.decode(String.self, forKey: .id),
+        senderId: try messageContainer.decode(String.self, forKey: .senderId),
+        content: try messageContainer.decode(String.self, forKey: .content),
+        timestamp: (try? messageContainer.decode(Timestamp.self, forKey: .timestamp))?.dateValue()
+          ?? Date(),
+        type: Message.MessageType(
+          rawValue: (try? messageContainer.decode(String.self, forKey: .type)) ?? "text") ?? .text,
+        reactions: (try? messageContainer.decode([String: [String]].self, forKey: .reactions))
+          ?? [:],
+        readBy: (try? messageContainer.decode([String].self, forKey: .readBy)) ?? [],
+        deliveredTo: (try? messageContainer.decode([String].self, forKey: .deliveredTo)) ?? []
+      )
     } else {
-        self.lastMessage = try container.decodeIfPresent(Message.self, forKey: .lastMessage)
+      self.lastMessage = try container.decodeIfPresent(Message.self, forKey: .lastMessage)
     }
-    
+
     self.isGroup = try container.decode(Bool.self, forKey: .isGroup)
     self.name = try container.decodeIfPresent(String.self, forKey: .name)
     self.isDatingChat = try container.decode(Bool.self, forKey: .isDatingChat)
     self.ownerId = try container.decodeIfPresent(String.self, forKey: .ownerId)
-    self.deletedForUsers = try container.decodeIfPresent([String].self, forKey: .deletedForUsers) ?? []
-    self.hiddenMessagesForUsers = try container.decodeIfPresent([String: [String]].self, forKey: .hiddenMessagesForUsers) ?? [:]
+    self.deletedForUsers =
+      try container.decodeIfPresent([String].self, forKey: .deletedForUsers) ?? []
+    self.hiddenMessagesForUsers =
+      try container.decodeIfPresent([String: [String]].self, forKey: .hiddenMessagesForUsers) ?? [:]
     self.typingUsers = try container.decodeIfPresent([String].self, forKey: .typingUsers) ?? []
     self.createdBy = try container.decodeIfPresent(String.self, forKey: .createdBy)
-    
+
     // Handle Timestamp conversion for dates
     if let timestamp = try container.decodeIfPresent(Timestamp.self, forKey: .lastActivity) {
       self.lastActivity = timestamp.dateValue()
     } else {
       self.lastActivity = Date()
     }
-    
+
     if let timestamp = try container.decodeIfPresent(Timestamp.self, forKey: .createdAt) {
       self.createdAt = timestamp.dateValue()
     } else {
       self.createdAt = nil
     }
-    
+
     // Handle both old and new unread count formats
     if let unreadCounts = try? container.decode([String: Int].self, forKey: .unreadCounts) {
       self.unreadCounts = unreadCounts
@@ -109,7 +116,7 @@ struct Chat: Identifiable, Codable {
         }
       )
       self.unreadCounts = newUnreadCounts
-      
+
       // Update the document to use the new format
       if let chatId = id {
         // Capture values in local variables to avoid capturing self
@@ -118,7 +125,7 @@ struct Chat: Identifiable, Codable {
           do {
             try await db.collection("chats").document(chatId).updateData([
               "unreadCounts": newUnreadCounts,
-              "unreadCount": FieldValue.delete()
+              "unreadCount": FieldValue.delete(),
             ])
           } catch {
             print("Error migrating unreadCount to unreadCounts: \(error)")
@@ -203,7 +210,7 @@ struct Chat: Identifiable, Codable {
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
-    
+
     try container.encodeIfPresent(id, forKey: .id)
     try container.encode(participants, forKey: .participants)
     try container.encodeIfPresent(lastMessage, forKey: .lastMessage)
@@ -270,50 +277,54 @@ struct Message: Identifiable, Codable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     id = try container.decodeIfPresent(String.self, forKey: .id)
     senderId = try container.decode(String.self, forKey: .senderId)
     content = try container.decode(String.self, forKey: .content)
-    
+
     if let timestamp = try? container.decode(Timestamp.self, forKey: .timestamp) {
       self.timestamp = timestamp.dateValue()
     } else {
       self.timestamp = Date()
     }
-    
+
     type = try container.decode(MessageType.self, forKey: .type)
     metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
     reactions = try container.decodeIfPresent([String: [String]].self, forKey: .reactions) ?? [:]
     replyTo = try container.decodeIfPresent(String.self, forKey: .replyTo)
-    
+
     // Handle empty replyPreview object
     if let replyPreviewData = try? container.decode([String: String].self, forKey: .replyPreview),
-       !replyPreviewData.isEmpty,
-       let messageId = replyPreviewData["messageId"],
-       let content = replyPreviewData["content"],
-       let senderId = replyPreviewData["senderId"],
-       let typeString = replyPreviewData["type"],
-       let type = MessageType(rawValue: typeString) {
-      self.replyPreview = ReplyPreview(messageId: messageId, content: content, senderId: senderId, type: type)
+      !replyPreviewData.isEmpty,
+      let messageId = replyPreviewData["messageId"],
+      let content = replyPreviewData["content"],
+      let senderId = replyPreviewData["senderId"],
+      let typeString = replyPreviewData["type"],
+      let type = MessageType(rawValue: typeString)
+    {
+      self.replyPreview = ReplyPreview(
+        messageId: messageId, content: content, senderId: senderId, type: type)
     } else {
       self.replyPreview = nil
     }
-    
+
     readBy = try container.decodeIfPresent([String].self, forKey: .readBy) ?? []
     deliveredTo = try container.decodeIfPresent([String].self, forKey: .deliveredTo) ?? []
   }
 
-  init(id: String? = nil,
-       senderId: String,
-       content: String,
-       timestamp: Date,
-       type: MessageType = .text,
-       metadata: MessageMetadata? = nil,
-       reactions: [String: [String]] = [:],
-       replyTo: String? = nil,
-       replyPreview: ReplyPreview? = nil,
-       readBy: [String] = [],
-       deliveredTo: [String] = []) {
+  init(
+    id: String? = nil,
+    senderId: String,
+    content: String,
+    timestamp: Date,
+    type: MessageType = .text,
+    metadata: MessageMetadata? = nil,
+    reactions: [String: [String]] = [:],
+    replyTo: String? = nil,
+    replyPreview: ReplyPreview? = nil,
+    readBy: [String] = [],
+    deliveredTo: [String] = []
+  ) {
     self.id = id
     self.senderId = senderId
     self.content = content
@@ -329,7 +340,7 @@ struct Message: Identifiable, Codable {
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
-    
+
     try container.encodeIfPresent(id, forKey: .id)
     try container.encode(senderId, forKey: .senderId)
     try container.encode(content, forKey: .content)
@@ -338,13 +349,13 @@ struct Message: Identifiable, Codable {
     try container.encodeIfPresent(metadata, forKey: .metadata)
     try container.encode(reactions, forKey: .reactions)
     try container.encodeIfPresent(replyTo, forKey: .replyTo)
-    
+
     if let preview = replyPreview {
       try container.encode(preview.asDictionary(), forKey: .replyPreview)
     } else {
       try container.encodeNil(forKey: .replyPreview)
     }
-    
+
     try container.encode(readBy, forKey: .readBy)
     try container.encode(deliveredTo, forKey: .deliveredTo)
   }
@@ -436,12 +447,12 @@ struct ReplyPreview: Codable {
     messageId = try container.decode(String.self, forKey: .messageId)
     content = try container.decode(String.self, forKey: .content)
     senderId = try container.decode(String.self, forKey: .senderId)
-    
+
     let typeString = try container.decode(String.self, forKey: .type)
     if let messageType = Message.MessageType(rawValue: typeString) {
       type = messageType
     } else {
-      type = .text // Default to text if type is invalid
+      type = .text  // Default to text if type is invalid
     }
   }
 
@@ -472,7 +483,7 @@ struct ReplyPreview: Codable {
       "messageId": messageId,
       "content": content,
       "senderId": senderId,
-      "type": type.rawValue
+      "type": type.rawValue,
     ]
   }
 }

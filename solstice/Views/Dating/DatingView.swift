@@ -126,6 +126,12 @@ struct DatingCardView: View {
   @State private var currentImageIndex = 0
   @Environment(\.locationManager) private var locationManager
 
+  private var age: Int {
+    let calendar = Calendar.current
+    let ageComponents = calendar.dateComponents([.year], from: profile.createdAt, to: Date())
+    return ageComponents.year ?? 0
+  }
+
   var body: some View {
     ZStack(alignment: .bottom) {
       if !profile.datingImages.isEmpty {
@@ -153,38 +159,38 @@ struct DatingCardView: View {
       }
 
       VStack(alignment: .leading, spacing: 8) {
-        Text(
-          "\(profile.fullName), \(Calendar.current.dateComponents([.year], from: Date()).year! - Calendar.current.dateComponents([.year], from: profile.createdAt).year!)"
-        )
-        .font(.title2)
-        .bold()
-
-        if let bio = profile.bio {
-          Text(bio)
-            .font(.body)
-            .lineLimit(3)
-        }
-
         HStack {
-          NavigationLink {
-            ProfileViewContainer(userId: profile.id!)
-          } label: {
-            Text("View Full Profile")
-              .font(.caption)
-              .foregroundColor(.white)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 6)
-              .background(Color.blue)
-              .cornerRadius(20)
-          }
+          Text("\(profile.fullName), \(age)")
+            .font(.title2)
+            .bold()
+            .foregroundColor(.white)
 
           Spacer()
 
           if let location = profile.location {
             Text("\(calculateDistance(to: location)) miles away")
-              .font(.caption)
+              .font(.subheadline)
               .foregroundColor(.white)
           }
+        }
+
+        if let bio = profile.bio {
+          Text(bio)
+            .font(.body)
+            .lineLimit(3)
+            .foregroundColor(.white)
+        }
+
+        NavigationLink {
+          ProfileViewContainer(userId: profile.id!)
+        } label: {
+          Text("View Full Profile")
+            .font(.caption)
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.blue)
+            .cornerRadius(20)
         }
       }
       .padding()

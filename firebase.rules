@@ -27,10 +27,11 @@ service cloud.firestore {
     }
     
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && request.auth.uid == userId;
-      allow delete: if isSignedIn() && request.auth.uid == userId;
+      // During development, allow creation without auth check
+      allow create: if true;  // More permissive during development
+      allow read: if true;    // More permissive during development
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
       
       // Add rules for likedVideos subcollection
       match /likedVideos/{videoId} {

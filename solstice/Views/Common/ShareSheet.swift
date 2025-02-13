@@ -58,7 +58,7 @@ struct ShareSheet: View {
                 }
               }
               .disabled(isDownloading)
-              
+
               if isDownloading {
                 ProgressView()
                   .padding()

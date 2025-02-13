@@ -24,7 +24,7 @@ enum MessageTab {
 @Observable
 final class MessagesTimerState {
   var lastUpdate = Date()
-  
+
   func update() {
     lastUpdate = Date()
   }
@@ -56,17 +56,17 @@ struct MessagesView: View {
     case .groups:
       chats = viewModel.groupChats
     }
-    
+
     if searchText.isEmpty {
       return chats
     }
-    
+
     return chats.filter { chat in
       chat.displayName.localizedCaseInsensitiveContains(searchText)
         || chat.lastMessage?.content.localizedCaseInsensitiveContains(searchText) == true
     }
   }
-  
+
   var body: some View {
     NavigationStack(path: $navigationPath) {
       MessagesContentView(
@@ -94,7 +94,7 @@ struct MessagesView: View {
     }
     .task {
       await viewModel.loadChats()
-      
+
       // Setup periodic updates
       let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
         Task { @MainActor in
@@ -108,7 +108,7 @@ struct MessagesView: View {
 
 private struct MessagesToolbar: ToolbarContent {
   @Binding var showNewMessage: Bool
-  
+
   var body: some ToolbarContent {
     ToolbarItem(placement: .navigationBarTrailing) {
       Button(action: { showNewMessage = true }) {
@@ -123,7 +123,7 @@ private struct MessagesNewChatSheet: View {
   @Binding var selectedChat: Chat?
   @Binding var showNewMessage: Bool
   @Binding var navigationPath: NavigationPath
-  
+
   var body: some View {
     NavigationStack {
       NewMessageView(
@@ -146,7 +146,7 @@ private struct MessagesContentView: View {
   @Binding var searchText: String
   let filteredChats: [Chat]
   let timerState: MessagesTimerState
-  
+
   var body: some View {
     VStack(spacing: 0) {
       // Custom tab picker
@@ -179,14 +179,16 @@ private struct ChatListView: View {
   let filteredChats: [Chat]
   let viewModel: MessagesViewModel
   let timerState: MessagesTimerState
-  
+
   var body: some View {
     ScrollView {
       LazyVStack(spacing: 0) {
         ForEach(filteredChats) { chat in
           NavigationLink(value: chat) {
             ChatListRow(chat: chat)
-              .id("chat_\(chat.id ?? "")_\(chat.lastMessage?.id ?? "")_\(chat.lastMessage?.timestamp.timeIntervalSince1970 ?? 0)")
+              .id(
+                "chat_\(chat.id ?? "")_\(chat.lastMessage?.id ?? "")_\(chat.lastMessage?.timestamp.timeIntervalSince1970 ?? 0)"
+              )
           }
           Divider()
             .padding(.leading, 76)
@@ -203,7 +205,7 @@ struct ChatListRow: View {
   let chat: Chat
   @Environment(\.colorScheme) var colorScheme
   @EnvironmentObject var authViewModel: AuthViewModel
-  
+
   var body: some View {
     HStack(spacing: 12) {
       // Avatar

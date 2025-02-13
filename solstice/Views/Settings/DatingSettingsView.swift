@@ -4,13 +4,13 @@ import PhotosUI
 import SwiftUI
 
 struct DatingSettingsView: View {
-  @Bindable private var viewModel: UserViewModel
+  @Environment(UserViewModel.self) private var viewModel
   @State private var showDeactivateConfirmation = false
   @State private var selectedPhotos: [PhotosPickerItem] = []
-
-  init(viewModel: UserViewModel) {
-    self.viewModel = viewModel
-  }
+  @State private var showBirthdayPicker = false
+  @State private var selectedDate = Date()
+  @State private var showError = false
+  @State private var errorMessage = ""
 
   var body: some View {
     List {
@@ -40,68 +40,139 @@ struct DatingSettingsView: View {
         "This will hide your dating profile and delete all your dating matches. This action cannot be undone."
       )
     }
+    .alert("Error", isPresented: $showError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(errorMessage)
+    }
+    .sheet(isPresented: $showBirthdayPicker) {
+      NavigationStack {
+        birthdayPickerView
+      }
+      .presentationDetents([.medium])
+    }
   }
 
   private var enableDatingToggleSection: some View {
     Section {
-      Toggle("Dating Active", isOn: $viewModel.user.isDatingEnabled)
-        .onChange(of: viewModel.user.isDatingEnabled) { _, newValue in
-          if !newValue {
+      Toggle("Dating Active", isOn: Binding(
+        get: { viewModel.user.isDatingEnabled },
+        set: { newValue in
+          viewModel.user.isDatingEnabled = newValue
+          if newValue {
+            // Check if birthday is set
+            if viewModel.user.birthday == nil {
+              // Show birthday picker
+              showBirthdayPicker = true
+              // Revert toggle until birthday is set
+              viewModel.user.isDatingEnabled = false
+            }
+          } else {
             showDeactivateConfirmation = true
           }
         }
+      ))
     } footer: {
-      Text(
-        "When dating is deactivated, your profile will be hidden from other users and all your dating matches will be deleted."
+      if viewModel.user.birthday == nil {
+        Text("You must set your birthday to enable dating.")
+      } else {
+        Text(
+          "When dating is deactivated, your profile will be hidden from other users and all your dating matches will be deleted."
+        )
+      }
+    }
+  }
+
+  private var birthdayPickerView: some View {
+    VStack {
+      DatePicker(
+        "Birthday",
+        selection: $selectedDate,
+        in: ...Calendar.current.date(byAdding: .year, value: -18, to: Date())!,
+        displayedComponents: .date
       )
+      .datePickerStyle(.wheel)
+      .padding()
+
+      Button("Set Birthday") {
+        Task {
+          do {
+            viewModel.user.birthday = selectedDate
+            try await viewModel.updateUser()
+            showBirthdayPicker = false
+            // Now enable dating
+            viewModel.user.isDatingEnabled = true
+            try await viewModel.updateUser()
+          } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+          }
+        }
+      }
+      .buttonStyle(.borderedProminent)
+      .padding()
+    }
+    .navigationTitle("Set Birthday")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .navigationBarLeading) {
+        Button("Cancel") {
+          showBirthdayPicker = false
+        }
+      }
     }
   }
 
   private var basicInformationSection: some View {
     Section("Basic Information") {
-      genderPicker
-      bioTextField
-    }
-  }
-
-  private var genderPicker: some View {
-    Picker("Gender", selection: $viewModel.user.gender) {
-      ForEach(User.Gender.allCases, id: \.self) { gender in
-        Text(gender.rawValue.capitalized).tag(gender)
-      }
-    }
-    .onChange(of: viewModel.user.gender) { oldValue, newValue in
-      Task {
-        do {
-          try await viewModel.updateUser()
-        } catch {
-          print("Error updating gender: \(error)")
-          viewModel.user.gender = oldValue
+      if let birthday = viewModel.user.birthday {
+        HStack {
+          Label("Birthday", systemImage: "calendar")
+          Spacer()
+          Text(birthday, style: .date)
+            .foregroundColor(.gray)
         }
       }
-    }
-  }
-
-  private var bioTextField: some View {
-    Group {
+      
+      Picker("Gender", selection: Binding(
+        get: { viewModel.user.gender },
+        set: { newValue in
+          let oldValue = viewModel.user.gender
+          viewModel.user.gender = newValue
+          Task {
+            do {
+              try await viewModel.updateUser()
+            } catch {
+              print("Error updating gender: \(error)")
+              viewModel.user.gender = oldValue
+            }
+          }
+        }
+      )) {
+        ForEach(User.Gender.allCases, id: \.self) { gender in
+          Text(gender.rawValue.capitalized).tag(gender)
+        }
+      }
+      
       TextField(
         "Bio",
         text: Binding(
-          get: { self.viewModel.user.bio ?? "" },
-          set: { self.viewModel.user.bio = $0 }
+          get: { viewModel.user.bio ?? "" },
+          set: { newValue in
+            let oldValue = viewModel.user.bio
+            viewModel.user.bio = newValue.isEmpty ? nil : newValue
+            Task {
+              do {
+                try await viewModel.updateUser()
+              } catch {
+                print("Error updating bio: \(error)")
+                viewModel.user.bio = oldValue
+              }
+            }
+          }
         )
       )
       .textFieldStyle(.roundedBorder)
-      .onChange(of: viewModel.user.bio) { oldValue, newValue in
-        Task {
-          do {
-            try await viewModel.updateUser()
-          } catch {
-            print("Error updating bio: \(error)")
-            viewModel.user.bio = oldValue
-          }
-        }
-      }
     }
   }
 
@@ -109,17 +180,13 @@ struct DatingSettingsView: View {
     Section("Dating Photos") {
       ScrollView(.horizontal) {
         HStack {
-          existingPhotos
+          ForEach(viewModel.user.datingImages, id: \.self) { photoURL in
+            datingPhotoView(for: photoURL)
+          }
           addPhotoButton
         }
         .padding(.vertical)
       }
-    }
-  }
-
-  private var existingPhotos: some View {
-    ForEach(viewModel.user.datingImages, id: \.self) { photoURL in
-      datingPhotoView(for: photoURL)
     }
   }
 
@@ -251,7 +318,8 @@ struct MultipleSelectionList<T: Hashable & Identifiable>: View {
 }
 
 #Preview {
-  NavigationStack {
-    DatingSettingsView(viewModel: UserViewModel())
+  NavigationView {
+    DatingSettingsView()
+      .environment(UserViewModel())
   }
 }

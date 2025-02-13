@@ -131,18 +131,19 @@ final class ProfileViewModel {
     let videosQuery = db.collection("videos")
       .whereField("creatorId", isEqualTo: userId)
       .order(by: "createdAt", descending: true)
-    
+
     let videosListener = videosQuery.addSnapshotListener { [weak self] snapshot, error in
       guard let self = self else { return }
       if let error = error {
         print("[ERROR] Error fetching videos: \(error)")
         return
       }
-      
-      let videos = snapshot?.documents.compactMap { doc -> Video? in
-        try? doc.data(as: Video.self)
-      } ?? []
-      
+
+      let videos =
+        snapshot?.documents.compactMap { doc -> Video? in
+          try? doc.data(as: Video.self)
+        } ?? []
+
       self.videos = videos
     }
     await listenerStore.add { videosListener.remove() }
@@ -151,7 +152,7 @@ final class ProfileViewModel {
     let likedVideosQuery = db.collectionGroup("likes")
       .whereField("userId", isEqualTo: userId)
       .order(by: "timestamp", descending: true)
-    
+
     let likedVideosListener = likedVideosQuery.addSnapshotListener { [weak self] snapshot, error in
       guard let self = self else { return }
       Task {
@@ -159,12 +160,13 @@ final class ProfileViewModel {
           print("[ERROR] Error fetching liked videos: \(error)")
           return
         }
-        
+
         // Get the parent video IDs
-        let videoIds = snapshot?.documents.compactMap { doc -> String? in
-          doc.reference.parent.parent?.documentID
-        } ?? []
-        
+        let videoIds =
+          snapshot?.documents.compactMap { doc -> String? in
+            doc.reference.parent.parent?.documentID
+          } ?? []
+
         // Fetch the actual videos
         var allVideos: [Video] = []
         for chunk in videoIds.chunked(into: 10) {
@@ -172,7 +174,7 @@ final class ProfileViewModel {
             let videoSnapshot = try await self.db.collection("videos")
               .whereField(FieldPath.documentID(), in: chunk)
               .getDocuments()
-            
+
             let videos = videoSnapshot.documents.compactMap { doc -> Video? in
               try? doc.data(as: Video.self)
             }
@@ -181,7 +183,7 @@ final class ProfileViewModel {
             print("[ERROR] Error fetching video details: \(error)")
           }
         }
-        
+
         await MainActor.run {
           self.likedVideos = allVideos.sorted { $0.createdAt > $1.createdAt }
         }
@@ -194,17 +196,18 @@ final class ProfileViewModel {
       let bookmarksQuery = db.collection("users")
         .document(userId)
         .collection("bookmarkCollections")
-      
+
       let bookmarksListener = bookmarksQuery.addSnapshotListener { [weak self] snapshot, error in
         guard let self = self else { return }
         if let error = error {
           print("[ERROR] Error fetching bookmarks: \(error)")
           return
         }
-        
-        self.bookmarkCollections = snapshot?.documents.compactMap { doc in
-          try? doc.data(as: BookmarkCollection.self)
-        } ?? []
+
+        self.bookmarkCollections =
+          snapshot?.documents.compactMap { doc in
+            try? doc.data(as: BookmarkCollection.self)
+          } ?? []
       }
       await listenerStore.add { bookmarksListener.remove() }
     }
@@ -213,14 +216,14 @@ final class ProfileViewModel {
   private func processUserData(_ data: [String: Any]) async throws {
     var userData = data
     userData["id"] = userId
-    
+
     // Handle nested ageRange structure
     if let ageRange = userData["ageRange"] as? [String: Any] {
       userData["ageRange.min"] = ageRange["min"] as? Int ?? 18
       userData["ageRange.max"] = ageRange["max"] as? Int ?? 100
       userData.removeValue(forKey: "ageRange")
     }
-    
+
     // Handle boolean fields
     for field in ["isDatingEnabled", "isPrivate"] {
       if let value = userData[field] {
@@ -231,13 +234,13 @@ final class ProfileViewModel {
         }
       }
     }
-    
+
     let decoder = Firestore.Decoder()
     decoder.keyDecodingStrategy = .useDefaultKeys
-    
+
     user = try decoder.decode(User.self, from: userData)
     isPrivateAccount = user?.isPrivate ?? false
-    
+
     if !isCurrentUserProfile {
       await checkFollowStatus()
     }
@@ -357,14 +360,14 @@ final class ProfileViewModel {
 
     do {
       print("[DEBUG] Fetching videos liked by user: \(userId)")
-      
+
       // Get all videos where this user has a like document
       let likedVideosQuery = db.collectionGroup("likes")
         .whereField("userId", isEqualTo: userId)
         .order(by: "timestamp", descending: true)
-      
+
       let likedSnapshot = try await likedVideosQuery.getDocuments()
-      
+
       // Get the parent video IDs
       let videoIds = likedSnapshot.documents.compactMap { doc -> String? in
         doc.reference.parent.parent?.documentID

@@ -38,12 +38,14 @@ actor VideoEditor: @unchecked Sendable {
 
     // Create new composition
     let composition = AVMutableComposition()
-    
+
     // Add video track
-    guard let compositionVideoTrack = composition.addMutableTrack(
-      withMediaType: .video,
-      preferredTrackID: kCMPersistentTrackID_Invalid
-    ) else {
+    guard
+      let compositionVideoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      )
+    else {
       throw VideoError.exportFailed("Failed to create video composition track")
     }
 
@@ -59,14 +61,15 @@ actor VideoEditor: @unchecked Sendable {
       of: videoTrack,
       at: .zero
     )
-    
+
     // Handle audio track if present
     let audioTracks = try await asset.loadTracks(withMediaType: .audio)
     if let audioTrack = audioTracks.first,
-       let compositionAudioTrack = composition.addMutableTrack(
+      let compositionAudioTrack = composition.addMutableTrack(
         withMediaType: .audio,
         preferredTrackID: kCMPersistentTrackID_Invalid
-       ) {
+      )
+    {
       // Add audio segment to composition
       try compositionAudioTrack.insertTimeRange(
         timeRange,
@@ -76,10 +79,12 @@ actor VideoEditor: @unchecked Sendable {
     }
 
     // Create export session with HEVC preset
-    guard let exportSession = AVAssetExportSession(
-      asset: composition,
-      presetName: AVAssetExportPresetHEVCHighestQuality
-    ) else {
+    guard
+      let exportSession = AVAssetExportSession(
+        asset: composition,
+        presetName: AVAssetExportPresetHEVCHighestQuality
+      )
+    else {
       throw VideoError.exportFailed("Failed to create export session")
     }
 
@@ -99,19 +104,19 @@ actor VideoEditor: @unchecked Sendable {
     } else {
       // For iOS 17 and earlier
       exportSession.timeRange = timeRange
-      
+
       // Monitor export progress
       for try await state in exportSession.states(updateInterval: 0.5) {
         if case .exporting(let progress) = state {
           print("Export progress: \(Int(progress.fractionCompleted * 100))%")
         }
       }
-      
+
       // Check if file exists at output URL
       guard FileManager.default.fileExists(atPath: outputURL.path) else {
         throw VideoError.exportFailed("Export failed - no output file found")
       }
-      
+
       return outputURL
     }
   }
@@ -132,4 +137,3 @@ enum VideoError: LocalizedError {
     }
   }
 }
-

@@ -20,8 +20,11 @@ struct Comment: Identifiable, Codable {
     case likes
     case userProfileImageURL
   }
-  
-  init(userId: String, text: String, timestamp: Date, username: String, userProfileImageURL: String? = nil, likes: Int = 0) {
+
+  init(
+    userId: String, text: String, timestamp: Date, username: String,
+    userProfileImageURL: String? = nil, likes: Int = 0
+  ) {
     self.userId = userId
     self.text = text
     self.timestamp = timestamp
