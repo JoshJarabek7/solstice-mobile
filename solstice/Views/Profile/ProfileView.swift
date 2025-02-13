@@ -68,15 +68,19 @@ struct _ProfileView: View {
         if let displayUser = viewModel.user {
           // Profile Header
           ProfileHeaderView(user: displayUser)
+            .frame(maxWidth: .infinity)
 
           // Bio
           if let bio = displayUser.bio {
             Text(bio)
+              .multilineTextAlignment(.center)
               .padding(.horizontal)
+              .frame(maxWidth: .infinity)
           }
 
           // Stats Row
           HStack(spacing: 40) {
+            Spacer()
             VStack {
               Text("\(viewModel.videos.count)")
                 .font(.headline)
@@ -95,8 +99,10 @@ struct _ProfileView: View {
               Text("Following")
                 .foregroundColor(.gray)
             }
+            Spacer()
           }
           .padding()
+          .frame(maxWidth: .infinity)
 
           // Tabs
           VStack(spacing: 0) {
@@ -226,22 +232,30 @@ struct TabButton: View {
 
 struct ProfileHeaderView: View {
   let user: User
+  @State private var showPhotoViewer = false
 
   var body: some View {
-    VStack(spacing: 12) {
+    VStack(alignment: .center, spacing: 12) {
       // Profile Image
       if let imageURL = user.profileImageURL {
-        AsyncImage(url: URL(string: imageURL)) { image in
-          image
-            .resizable()
-            .scaledToFill()
-        } placeholder: {
-          Image(systemName: "person.circle.fill")
-            .resizable()
-            .foregroundColor(.gray)
+        Button {
+          showPhotoViewer = true
+        } label: {
+          AsyncImage(url: URL(string: imageURL)) { image in
+            image
+              .resizable()
+              .scaledToFill()
+          } placeholder: {
+            Image(systemName: "person.circle.fill")
+              .resizable()
+              .foregroundColor(.gray)
+          }
+          .frame(width: 100, height: 100)
+          .clipShape(Circle())
         }
-        .frame(width: 100, height: 100)
-        .clipShape(Circle())
+        .fullScreenCover(isPresented: $showPhotoViewer) {
+          PhotoViewer(imageURL: imageURL, isPresented: $showPhotoViewer)
+        }
       } else {
         Image(systemName: "person.circle.fill")
           .resizable()
@@ -250,7 +264,7 @@ struct ProfileHeaderView: View {
       }
 
       // User Info
-      VStack(spacing: 4) {
+      VStack(alignment: .center, spacing: 4) {
         if !user.fullName.isEmpty {
           Text(user.fullName)
             .font(.title2)
@@ -264,31 +278,46 @@ struct ProfileHeaderView: View {
         }
       }
     }
+    .frame(maxWidth: .infinity)
   }
 }
 
 struct DatingProfileSection: View {
   let user: User
+  @State private var showPhotoViewer = false
+  @State private var selectedPhotoIndex = 0
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       // Dating Images
       ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 12) {
-          ForEach(user.datingImages, id: \.self) { imageURL in
-            AsyncImage(url: URL(string: imageURL)) { image in
-              image
-                .resizable()
-                .scaledToFill()
-            } placeholder: {
-              Rectangle()
-                .fill(Color.gray.opacity(0.2))
+          ForEach(user.datingImages.indices, id: \.self) { index in
+            Button {
+              selectedPhotoIndex = index
+              showPhotoViewer = true
+            } label: {
+              AsyncImage(url: URL(string: user.datingImages[index])) { image in
+                image
+                  .resizable()
+                  .scaledToFill()
+              } placeholder: {
+                Rectangle()
+                  .fill(Color.gray.opacity(0.2))
+              }
+              .frame(width: 200, height: 300)
+              .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .frame(width: 200, height: 300)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
           }
         }
         .padding(.horizontal)
+      }
+      .fullScreenCover(isPresented: $showPhotoViewer) {
+        PhotoCarouselViewer(
+          images: user.datingImages,
+          initialIndex: selectedPhotoIndex,
+          isPresented: $showPhotoViewer
+        )
       }
 
       // Dating Bio
