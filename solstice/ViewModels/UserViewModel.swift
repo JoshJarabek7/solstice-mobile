@@ -75,24 +75,37 @@ final class UserViewModel {
         }
       }
     }
-    print("[DEBUG] loadUser - After processing fields: \(data)")
-    print("[DEBUG] loadUser - Dating images: \(data["datingImages"] as? [String] ?? [])")
-    // Handle arrays - leave interestedIn as strings for decoding
+
+    // Handle maxDistance field
+    if let maxDistance = data["maxDistance"] {
+      if let doubleValue = maxDistance as? Double {
+        data["maxDistance"] = doubleValue
+      } else if let intValue = maxDistance as? Int {
+        data["maxDistance"] = Double(intValue)
+      } else {
+        data["maxDistance"] = 50.0
+      }
+    }
+
+    // Handle arrays
     if let datingImages = data["datingImages"] as? [String] {
       data["datingImages"] = datingImages
     } else {
       data["datingImages"] = [String]()
     }
-    print("[DEBUG] loadUser - After handling dating images: \(data)")
-    print("[DEBUG] loadUser - About to handle timestamps")
+
     // Handle timestamps
     if let timestamp = data["createdAt"] as? Timestamp {
       data["createdAt"] = timestamp.dateValue()
     }
-    print("[DEBUG] loadUser - After handling timestamps: \(data)")
+    
+    // Remove the birthday conversion to preserve the Timestamp for the decoder
+    // if let birthdayTimestamp = data["birthday"] as? Timestamp {
+    //   data["birthday"] = birthdayTimestamp.dateValue()
+    // }
+
     print("[DEBUG] Final processed data before decoding: \(data)")
 
-    print("[DEBUG] loadUser - Final data before decoding: \(data)")
     // Create decoder with document reference
     let decoder = Firestore.Decoder()
     decoder.keyDecodingStrategy = .useDefaultKeys
@@ -103,7 +116,7 @@ final class UserViewModel {
       self.user = decodedUser
       print("[DEBUG] Successfully loaded user with ID: \(userId)")
       print(
-        "[DEBUG] User data: username=\(decodedUser.username), isDatingEnabled=\(decodedUser.isDatingEnabled), interestedIn=\(decodedUser.interestedIn)"
+        "[DEBUG] User data: username=\(decodedUser.username), isDatingEnabled=\(decodedUser.isDatingEnabled), interestedIn=\(decodedUser.interestedIn), birthday=\(String(describing: decodedUser.birthday))"
       )
     } catch {
       print("[ERROR] Failed to decode user data: \(error)\nData: \(data)")
@@ -208,7 +221,7 @@ final class UserViewModel {
       existingData["createdAt"] as? Timestamp ?? Timestamp(date: localUser.createdAt)
 
     // Create an isolated dictionary with all fields
-    let isolatedData: [String: Any] = [
+    var isolatedData: [String: Any] = [
       "username": localUser.username,
       "email": localUser.email,
       "fullName": localUser.fullName,
@@ -216,7 +229,7 @@ final class UserViewModel {
       "isDatingEnabled": localUser.isDatingEnabled,
       "gender": localUser.gender.rawValue,
       "interestedIn": interestedIn,
-      "maxDistance": localUser.maxDistance,
+      "maxDistance": Double(localUser.maxDistance),  // Ensure it's stored as Double
       "followersCount": localUser.followersCount,
       "followingCount": localUser.followingCount,
       "datingImages": datingImages,
@@ -230,8 +243,14 @@ final class UserViewModel {
       "createdAt": existingCreatedAt,
     ]
 
+    // Add birthday if it exists
+    if let birthday = localUser.birthday {
+      isolatedData["birthday"] = Timestamp(date: birthday)
+    }
+
     print("[DEBUG] User data to update: \(isolatedData)")
     print("[DEBUG] About to write to path: /users/\(userId)")
+    print("[DEBUG] maxDistance being saved: \(localUser.maxDistance)")
 
     // Try basic update first
     try await testBasicUpdate()

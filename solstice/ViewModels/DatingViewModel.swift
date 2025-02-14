@@ -2,22 +2,27 @@
 @preconcurrency import FirebaseAuth
 @preconcurrency import FirebaseFirestore
 @preconcurrency import SwiftUI
+import Observation
 
-@MainActor
+@Observable
 final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
   private let database = Firestore.firestore()
   private var lastDocument: DocumentSnapshot?
   private let locationManager: CLLocationManager
   private var isInitialized = false
 
-  @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
-  @Published private(set) var currentLocation: CLLocation?
+  var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
+  var currentLocation: CLLocation?
   private var locationAuthorizationContinuation: CheckedContinuation<Void, Error>?
 
-  @Published private(set) var profiles = [User]()
-  @Published private(set) var cardOffsets = [CGSize]()
-  @Published private(set) var cardRotations = [Angle]()
-  @Published var filters = DatingFilters()
+  var profiles = [User]()
+  var cardOffsets = [CGSize]()
+  var cardRotations = [Angle]()
+  var filters = DatingFilters()
+  
+  // Track if we're returning from profile view
+  private var isReturningFromProfile = false
+  private var lastProfileCount = 0
 
   override init() {
     self.locationManager = CLLocationManager()
@@ -39,10 +44,15 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
 
   func refreshProfiles() async throws {
     guard isInitialized else { return }
-    // Clear existing profiles
-    profiles.removeAll()
-    cardOffsets.removeAll()
-    cardRotations.removeAll()
+    
+    // If returning from profile view, don't clear the stack
+    if !isReturningFromProfile {
+      profiles.removeAll()
+      cardOffsets.removeAll()
+      cardRotations.removeAll()
+    } else {
+      isReturningFromProfile = false
+    }
 
     // Fetch new profiles
     try await fetchProfiles()
@@ -160,12 +170,22 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
     }
 
     // Check age range compatibility
-    guard let theirAgeMin = data["ageRangeMin"] as? Int,
-      let theirAgeMax = data["ageRangeMax"] as? Int,
-      theirAgeMax >= filters.ageRange.lowerBound,
-      theirAgeMin <= filters.ageRange.upperBound
-    else {
-      print("[DEBUG] Profile filtered out due to age range")
+    if let ageRange = data["ageRange"] as? [String: Any],
+       let theirAgeMin = ageRange["min"] as? Int,
+       let theirAgeMax = ageRange["max"] as? Int
+    {
+      print("[DEBUG] Checking age range compatibility:")
+      print("[DEBUG] Their range: \(theirAgeMin)-\(theirAgeMax)")
+      print("[DEBUG] Our range: \(filters.ageRange.lowerBound)-\(filters.ageRange.upperBound)")
+      
+      // Check if their max age is greater than or equal to our minimum age
+      // AND their min age is less than or equal to our maximum age
+      guard theirAgeMax >= filters.ageRange.lowerBound && theirAgeMin <= filters.ageRange.upperBound else {
+        print("[DEBUG] Profile filtered out due to age range mismatch")
+        return false
+      }
+    } else {
+      print("[DEBUG] Profile missing age range data")
       return false
     }
 
@@ -176,12 +196,14 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
       let profileLocation = CLLocation(
         latitude: geoPoint.latitude, longitude: geoPoint.longitude)
       let distance = userLocation.distance(from: profileLocation) / 1609.34  // Convert to miles
+      print("[DEBUG] Distance between users: \(distance) miles")
       guard distance <= maxDistance else {
-        print("[DEBUG] Profile filtered out due to distance")
+        print("[DEBUG] Profile filtered out due to distance (\(distance) miles > \(maxDistance) miles)")
         return false
       }
     }
 
+    print("[DEBUG] Profile passed all filters")
     return true
   }
 
@@ -345,50 +367,8 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
     }
   }
 
-  private func likeProfile(_ profile: User) async {
-    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
-
-    do {
-      // Add like to Firestore
-      try await database.collection("likes")
-        .document("\(currentUserId)_\(profile.id!)")
-        .setData([
-          "likerId": currentUserId,
-          "likedId": profile.id!,
-          "timestamp": FieldValue.serverTimestamp(),
-        ])
-
-      // Check for mutual like (match)
-      let mutualLike = try await database.collection("likes")
-        .document("\(profile.id!)_\(currentUserId)")
-        .getDocument()
-
-      if mutualLike.exists {
-        // Create a match
-        try await createMatch(with: profile)
-      }
-    } catch {
-      print("Error liking profile: \(error)")
-    }
-  }
-
-  private func passProfile(_ profile: User) async {
-    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
-
-    do {
-      // Record the pass in Firestore
-      try await database.collection("passes")
-        .document("\(currentUserId)_\(profile.id!)")
-        .setData([
-          "passerId": currentUserId,
-          "passedId": profile.id!,
-          "timestamp": FieldValue.serverTimestamp(),
-        ])
-    } catch {
-      print("Error passing profile: \(error)")
-    }
-  }
-
+  // MARK: - Profile Actions
+  
   private func createMatch(with profile: User) async throws {
     guard let currentUserId = Auth.auth().currentUser?.uid,
       let profileId = profile.id
@@ -404,15 +384,108 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
       "lastMessage": NSNull(),
       "lastMessageTimestamp": FieldValue.serverTimestamp(),
       "createdAt": FieldValue.serverTimestamp(),
+      "type": "dating", // Add chat type to distinguish dating matches
     ]
 
     // Create a new match document
-    try await database.collection("matches").addDocument(data: matchData)
+    let matchRef = try await database.collection("matches").addDocument(data: matchData)
 
     // Create a chat for the match
-    try await database.collection("chats").addDocument(data: chatData)
+    let chatRef = try await database.collection("chats").addDocument(data: chatData)
 
-    // TODO: Send match notification
+    // Add chat reference to match
+    try await matchRef.updateData(["chatId": chatRef.documentID])
+
+    // Send match notification
+    let notificationData: [String: Any] = [
+      "type": "match",
+      "fromUserId": currentUserId,
+      "toUserId": profileId,
+      "matchId": matchRef.documentID,
+      "chatId": chatRef.documentID,
+      "timestamp": FieldValue.serverTimestamp(),
+      "read": false
+    ]
+    
+    try await database.collection("notifications").addDocument(data: notificationData)
+  }
+
+  func likeProfile(_ profile: User) async {
+    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+
+    do {
+      print("[DEBUG] Liking profile: \(profile.id ?? "unknown")")
+      
+      // Add like to Firestore
+      try await database.collection("likes")
+        .document("\(currentUserId)_\(profile.id!)")
+        .setData([
+          "likerId": currentUserId,
+          "likedId": profile.id!,
+          "timestamp": FieldValue.serverTimestamp(),
+        ])
+
+      // Check for mutual like (match)
+      let mutualLike = try await database.collection("likes")
+        .document("\(profile.id!)_\(currentUserId)")
+        .getDocument()
+
+      if mutualLike.exists {
+        print("[DEBUG] Found mutual like - creating match")
+        // Create a match
+        try await createMatch(with: profile)
+        
+        // Notify the UI of the match
+        await MainActor.run {
+          // Find the card view and show match alert
+          if let _ = profiles.firstIndex(where: { $0.id == profile.id }) {
+            // The card view will show the match alert
+            print("[DEBUG] Match created successfully")
+          }
+        }
+      }
+    } catch {
+      print("[ERROR] Error liking profile: \(error)")
+    }
+  }
+
+  func passProfile(_ profile: User) async {
+    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+
+    do {
+      print("[DEBUG] Passing profile: \(profile.id ?? "unknown")")
+      
+      // Record the pass in Firestore
+      try await database.collection("passes")
+        .document("\(currentUserId)_\(profile.id!)")
+        .setData([
+          "passerId": currentUserId,
+          "passedId": profile.id!,
+          "timestamp": FieldValue.serverTimestamp(),
+        ])
+    } catch {
+      print("[ERROR] Error passing profile: \(error)")
+    }
+  }
+
+  func setReturningFromProfile(_ returning: Bool) {
+    isReturningFromProfile = returning
+  }
+
+  @MainActor
+  func removeProfile(at index: Int) async {
+    withAnimation {
+      profiles.remove(at: index)
+      cardOffsets.remove(at: index)
+      cardRotations.remove(at: index)
+    }
+    
+    // Fetch more profiles if running low
+    if profiles.count < 3 {
+      Task {
+        try? await fetchProfiles()
+      }
+    }
   }
 }
 

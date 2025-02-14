@@ -9,12 +9,9 @@ struct DatingFiltersView: View {
   let onSave: () -> Void
 
   init(filters: Binding<DatingFilters>, onSave: @escaping () -> Void) {
-
     print("[DEBUG] DatingFiltersView - Initializing - Calling UserViewModel")
-
     self._filters = filters
     self.onSave = onSave
-    print("[DEBUG] DatingFiltersView initialized with filters: \(filters.wrappedValue)")
   }
 
   var body: some View {
@@ -34,34 +31,23 @@ struct DatingFiltersView: View {
                 print("[DEBUG] Saving filters: \(filters)")
 
                 // Update user model with new filter values
-                userViewModel.user.interestedIn = filters.interestedIn
+                var updatedUser = userViewModel.user
+                updatedUser.interestedIn = filters.interestedIn
+                updatedUser.maxDistance = filters.maxDistance ?? 50
+                updatedUser.ageRange = filters.ageRange
 
-                // Ensure we're using the actual distance value
-                if let distance = filters.maxDistance {
-                  print(
-                    "[DEBUG] Setting maxDistance in user model to: \(distance)")
-                  userViewModel.user.maxDistance = distance
-                } else {
-                  print("[DEBUG] No distance value to update")
-                }
+                print("[DEBUG] Setting maxDistance to: \(updatedUser.maxDistance)")
 
-                userViewModel.user.ageRange = filters.ageRange
-
-                print(
-                  "[DEBUG] About to save user with maxDistance: \(userViewModel.user.maxDistance)"
-                )
+                // Update the user model
+                userViewModel.user = updatedUser
 
                 // Save to Firebase
                 try await userViewModel.updateUser()
-                print(
-                  "[DEBUG] Successfully saved user with maxDistance: \(userViewModel.user.maxDistance)"
-                )
 
                 onSave()  // Call the callback after successful save
                 dismiss()
               } catch {
-                errorMessage =
-                  "Failed to save filters: \(error.localizedDescription)"
+                errorMessage = "Failed to save filters: \(error.localizedDescription)"
                 showError = true
               }
             }
@@ -74,7 +60,12 @@ struct DatingFiltersView: View {
         Text(errorMessage)
       }
       .onAppear {
-        print("[DEBUG] DatingFiltersView appeared with filters: \(filters)")
+        print("[DEBUG] Current user maxDistance: \(userViewModel.user.maxDistance)")
+        // Initialize filters with current user preferences
+        filters.interestedIn = userViewModel.user.interestedIn
+        filters.maxDistance = userViewModel.user.maxDistance
+        filters.ageRange = userViewModel.user.ageRange
+        print("[DEBUG] Initialized filters with maxDistance: \(filters.maxDistance ?? 50)")
       }
     }
   }
@@ -92,14 +83,14 @@ struct DatingFiltersView: View {
       DistanceSlider(
         distance: Binding(
           get: {
-            let value = filters.maxDistance ?? 50
+            let value = filters.maxDistance ?? userViewModel.user.maxDistance
             print("[DEBUG] Distance slider getter returning: \(value)")
             return value
           },
           set: { newValue in
             print("[DEBUG] Distance slider setter called with: \(newValue)")
             filters.maxDistance = newValue
-            print("[DEBUG] Distance slider updated to: \(newValue)")
+            print("[DEBUG] Distance slider updated filters.maxDistance to: \(filters.maxDistance ?? 50)")
           }
         ))
     }
@@ -150,9 +141,7 @@ struct DistanceSlider: View {
     let initialDistance = distance.wrappedValue
     let displayValue = initialDistance >= unlimitedValue ? maxDistance : initialDistance
     self._sliderValue = State(initialValue: displayValue)
-    print(
-      "[DEBUG] DistanceSlider initialized with raw value: \(initialDistance), display value: \(displayValue)"
-    )
+    print("[DEBUG] DistanceSlider initialized with raw value: \(initialDistance), display value: \(displayValue)")
   }
 
   var displayText: String {
@@ -181,9 +170,7 @@ struct DistanceSlider: View {
       }
     }
     .onAppear {
-      print(
-        "[DEBUG] DistanceSlider appeared with distance: \(distance), slider value: \(sliderValue)"
-      )
+      print("[DEBUG] DistanceSlider appeared with distance: \(distance), slider value: \(sliderValue)")
     }
   }
 }

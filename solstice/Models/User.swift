@@ -34,7 +34,9 @@ struct User: Identifiable, Codable, Equatable, Hashable {
 
   var age: Int? {
     guard let birthday = birthday else { return nil }
-    return Calendar.current.dateComponents([.year], from: birthday, to: Date()).year
+    let calendar = Calendar.current
+    let ageComponents = calendar.dateComponents([.year], from: birthday, to: Date())
+    return ageComponents.year
   }
 
   var ageRange: ClosedRange<Int> {
@@ -180,6 +182,21 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     } else {
       self.createdAt = Date()
     }
+
+    // Handle birthday timestamp
+    do {
+      if let birthdayTimestamp = try? container.decode(Timestamp.self, forKey: .birthday) {
+        self.birthday = birthdayTimestamp.dateValue()
+      }
+      else if let birthdayDate = try? container.decode(Date.self, forKey: .birthday) {
+        self.birthday = birthdayDate
+      }
+      else {
+        self.birthday = nil
+      }
+    } catch {
+      self.birthday = nil
+    }
   }
 
   func encode(to encoder: Encoder) throws {
@@ -209,7 +226,11 @@ struct User: Identifiable, Codable, Equatable, Hashable {
     try container.encode(datingImages, forKey: .datingImages)
     try container.encode(username_lowercase, forKey: .username_lowercase)
     try container.encode(fullName_lowercase, forKey: .fullName_lowercase)
-    try container.encode(birthday, forKey: .birthday)
+    
+    // Encode birthday as Timestamp if present
+    if let birthday = birthday {
+      try container.encode(Timestamp(date: birthday), forKey: .birthday)
+    }
   }
 
   func hash(into hasher: inout Hasher) {
