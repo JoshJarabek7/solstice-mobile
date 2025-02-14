@@ -196,12 +196,13 @@ final class FollowListViewModel: ObservableObject {
 
   private func isFollowing(currentUserId: String, targetUserId: String) async -> Bool {
     do {
-      let doc = try await db.collection("follows")
-        .whereField("followerId", isEqualTo: currentUserId)
-        .whereField("followedId", isEqualTo: targetUserId)
-        .getDocuments()
+      let doc = try await db.collection("users")
+        .document(currentUserId)
+        .collection("following")
+        .document(targetUserId)
+        .getDocument()
 
-      return !doc.documents.isEmpty
+      return doc.exists
     } catch {
       return false
     }

@@ -1,4 +1,5 @@
 import FirebaseFirestore
+import FirebaseAuth
 import SwiftUI
 
 extension Date {
@@ -37,6 +38,7 @@ struct MessagesView: View {
   // So instead of requiring ObservableObject & @ObservedObject / @StateObject,
   // we do this. SwiftUI will track changes in real time on iOS 17+.
   @Bindable var viewModel: MessagesViewModel
+  @EnvironmentObject var authViewModel: AuthViewModel
 
   @State private var showNewMessage = false
   @State private var searchText = ""
@@ -65,9 +67,11 @@ struct MessagesView: View {
       return chats
     }
 
+    let searchQuery = searchText.lowercased()
     return chats.filter { chat in
-      chat.displayName.localizedCaseInsensitiveContains(searchText)
-        || chat.lastMessage?.content.localizedCaseInsensitiveContains(searchText) == true
+      let name = chat.displayName(currentUserId: viewModel.currentUserId).lowercased()
+      let content = chat.lastMessage?.content.lowercased() ?? ""
+      return name.contains(searchQuery) || content.contains(searchQuery)
     }
   }
 
@@ -217,13 +221,17 @@ struct ChatListRow: View {
       if chat.isGroup {
         GroupChatAvatar(users: chat.participants)
       } else {
-        UserAvatar(user: chat.participants.first!)
+        if let otherUser = chat.otherParticipant(currentUserId: authViewModel.currentUser?.id ?? "") {
+          UserAvatar(user: otherUser)
+        } else {
+          UserAvatar(user: chat.participants.first!)
+        }
       }
 
       // Chat info
       VStack(alignment: .leading, spacing: 4) {
         HStack {
-          Text(chat.displayName)
+          Text(chat.displayName(currentUserId: authViewModel.currentUser?.id))
             .font(.headline)
 
           Spacer()

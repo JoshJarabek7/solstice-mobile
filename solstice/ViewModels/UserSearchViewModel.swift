@@ -67,7 +67,10 @@ final class UserSearchViewModel {
 
   @MainActor
   func searchUsers(_ query: String) async {
+    print("[DEBUG] -------- Search Start --------")
     print("[DEBUG] Starting search with query: '\(query)'")
+    print("[DEBUG] Current user ID: \(Auth.auth().currentUser?.uid ?? "nil")")
+    print("[DEBUG] Is user signed in: \(Auth.auth().currentUser != nil)")
 
     guard !query.isEmpty else {
       print("[DEBUG] Empty query, clearing results")
@@ -81,88 +84,55 @@ final class UserSearchViewModel {
     // Create new search task
     searchTask = Task {
       isLoading = true
-      defer { isLoading = false }
+      defer { 
+        isLoading = false
+        print("[DEBUG] -------- Search End --------")
+      }
 
       do {
+        // Start with a simple query to test permissions
+        print("[DEBUG] Attempting simple query first")
+        let testQuery = try await db.collection("users")
+          .limit(to: 1)
+          .getDocuments()
+        
+        print("[DEBUG] Simple query successful, got \(testQuery.documents.count) documents")
+        
         var results = Set<User>()
+        let lowercaseQuery = query.lowercased()
 
+        print("[DEBUG] Attempting username search with lowercase query: '\(lowercaseQuery)'")
         // Search by username
         let usernameSnapshot = try await db.collection("users")
-          .whereField("username", isGreaterThanOrEqualTo: query)
-          .whereField("username", isLessThan: query + "\u{f8ff}")
+          .whereField("username_lowercase", isGreaterThanOrEqualTo: lowercaseQuery)
+          .whereField("username_lowercase", isLessThan: lowercaseQuery + "\u{f8ff}")
           .limit(to: 10)
           .getDocuments()
 
-        print("[DEBUG] Username search returned \(usernameSnapshot.documents.count) results")
-
-        // Search by full name
-        let fullNameSnapshot = try await db.collection("users")
-          .whereField("fullName", isGreaterThanOrEqualTo: query)
-          .whereField("fullName", isLessThan: query + "\u{f8ff}")
-          .limit(to: 10)
-          .getDocuments()
-
-        print("[DEBUG] Full name search returned \(fullNameSnapshot.documents.count) results")
+        print("[DEBUG] Username search successful, returned \(usernameSnapshot.documents.count) results")
 
         // Process username results
         for document in usernameSnapshot.documents {
           print("[DEBUG] Processing username document: \(document.documentID)")
           if let user = processDocument(document), user.id != currentUserId {
-            print("[DEBUG] Adding user by username: \(user.username) with ID: \(user.id ?? "nil")")
+            print("[DEBUG] Successfully processed user: \(user.username)")
             results.insert(user)
           }
-        }
-
-        // Process full name results
-        for document in fullNameSnapshot.documents {
-          print("[DEBUG] Processing fullname document: \(document.documentID)")
-          if let user = processDocument(document), user.id != currentUserId {
-            print("[DEBUG] Adding user by full name: \(user.fullName) with ID: \(user.id ?? "nil")")
-            results.insert(user)
-          }
-        }
-
-        // Sort results by relevance
-        let sortedResults = Array(results).sorted { user1, user2 in
-          // Prioritize exact matches
-          let username1MatchesExactly = user1.username == query
-          let username2MatchesExactly = user2.username == query
-          let fullName1MatchesExactly = user1.fullName == query
-          let fullName2MatchesExactly = user2.fullName == query
-
-          if username1MatchesExactly != username2MatchesExactly {
-            return username1MatchesExactly
-          }
-
-          if fullName1MatchesExactly != fullName2MatchesExactly {
-            return fullName1MatchesExactly
-          }
-
-          // Then prioritize starts with
-          let username1StartsWith = user1.username.hasPrefix(query)
-          let username2StartsWith = user2.username.hasPrefix(query)
-
-          if username1StartsWith != username2StartsWith {
-            return username1StartsWith
-          }
-
-          let fullName1StartsWith = user1.fullName.hasPrefix(query)
-          let fullName2StartsWith = user2.fullName.hasPrefix(query)
-
-          if fullName1StartsWith != fullName2StartsWith {
-            return fullName1StartsWith
-          }
-
-          // Finally sort by follower count
-          return user1.followersCount > user2.followersCount
         }
 
         if !Task.isCancelled {
-          print("[DEBUG] Setting final search results count: \(sortedResults.count)")
-          self.searchResults = sortedResults
+          print("[DEBUG] Setting final search results count: \(results.count)")
+          self.searchResults = Array(results)
         }
       } catch {
-        print("[ERROR] Search failed: \(error.localizedDescription)")
+        print("[ERROR] Search failed with error: \(error)")
+        print("[ERROR] Error description: \(error.localizedDescription)")
+        if let firestoreError = error as NSError? {
+          print("[ERROR] Firestore error code: \(firestoreError.code)")
+          print("[ERROR] Firestore error domain: \(firestoreError.domain)")
+          print("[ERROR] Firestore error userInfo: \(firestoreError.userInfo)")
+        }
+        
         if !Task.isCancelled {
           self.error = error
           self.searchResults = []

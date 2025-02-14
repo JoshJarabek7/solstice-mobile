@@ -255,29 +255,41 @@ final class ProfileViewModel {
     }
 
     do {
-      print(
-        "[DEBUG] Checking follow status for currentUserId: \(currentUserId) -> targetId: \(userId)")
-      // Check if following
-      let followDoc = try await db.collection("follows")
-        .whereField("followerId", isEqualTo: currentUserId)
-        .whereField("followedId", isEqualTo: userId)
-        .getDocuments()
+      print("[DEBUG] Checking follow status for currentUserId: \(currentUserId) -> targetId: \(userId)")
+      
+      // First check following status
+      let followingDoc = try await db.collection("users")
+        .document(currentUserId)
+        .collection("following")
+        .document(userId)
+        .getDocument()
 
-      isFollowing = !followDoc.documents.isEmpty
+      isFollowing = followingDoc.exists
       print("[DEBUG] isFollowing: \(isFollowing)")
 
-      // Check if follow request exists
-      let requestDoc = try await db.collection("followRequests")
-        .whereField("requesterId", isEqualTo: currentUserId)
-        .whereField("targetId", isEqualTo: userId)
-        .getDocuments()
+      // Only check follow request if not already following
+      if !isFollowing {
+        let requestSnapshot = try await db.collection("followRequests")
+          .whereField("requesterId", isEqualTo: currentUserId)
+          .whereField("targetId", isEqualTo: userId)
+          .limit(to: 1)
+          .getDocuments()
 
-      followRequestSent = !requestDoc.documents.isEmpty
-      print("[DEBUG] followRequestSent: \(followRequestSent)")
+        followRequestSent = !requestSnapshot.documents.isEmpty
+        print("[DEBUG] followRequestSent: \(followRequestSent)")
+      } else {
+        followRequestSent = false
+      }
     } catch {
       print("[ERROR] Failed to check follow status: \(error)")
-      errorMessage = "Failed to check follow status"
-      showError = true
+      if let firestoreError = error as NSError? {
+        print("[ERROR] Firestore error code: \(firestoreError.code)")
+        print("[ERROR] Firestore error domain: \(firestoreError.domain)")
+        print("[ERROR] Firestore error userInfo: \(firestoreError.userInfo)")
+      }
+      // Don't show error to user, just set default states
+      isFollowing = false
+      followRequestSent = false
     }
   }
 
@@ -548,23 +560,36 @@ final class ProfileViewModel {
         }
       } else {
         if isFollowing {
-          // Unfollow
-          let followDoc = try await db.collection("follows")
-            .whereField("followerId", isEqualTo: currentUserId)
-            .whereField("followedId", isEqualTo: targetUserId)
-            .getDocuments()
+          // Unfollow - remove from both following and followers subcollections
+          try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(targetUserId)
+            .delete()
 
-          if let doc = followDoc.documents.first {
-            try await doc.reference.delete()
-            isFollowing = false
-          }
+          try await db.collection("users")
+            .document(targetUserId)
+            .collection("followers")
+            .document(currentUserId)
+            .delete()
+
+          isFollowing = false
         } else {
-          // Follow
-          try await db.collection("follows").addDocument(data: [
-            "followerId": currentUserId,
-            "followedId": targetUserId,
-            "timestamp": FieldValue.serverTimestamp(),
-          ])
+          // Follow - add to both following and followers subcollections
+          let timestamp = FieldValue.serverTimestamp()
+          
+          try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(targetUserId)
+            .setData(["timestamp": timestamp])
+
+          try await db.collection("users")
+            .document(targetUserId)
+            .collection("followers")
+            .document(currentUserId)
+            .setData(["timestamp": timestamp])
+
           isFollowing = true
         }
       }

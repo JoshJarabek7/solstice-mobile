@@ -16,7 +16,7 @@ struct GroupInfoView: View {
   var body: some View {
     List {
       Section("Group Name") {
-        Text(chat.displayName)
+        Text(chat.displayName())
           .font(.headline)
       }
 

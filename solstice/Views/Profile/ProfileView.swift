@@ -130,7 +130,7 @@ private struct ProfileContent: View {
   var body: some View {
     VStack(alignment: .center, spacing: 24) {
       // Profile Header
-      ProfileHeaderView(user: displayUser)
+      ProfileHeaderView(user: displayUser, viewModel: viewModel)
         .frame(maxWidth: .infinity)
 
       // Bio
@@ -297,6 +297,8 @@ struct TabButton: View {
 struct ProfileHeaderView: View {
   let user: User
   @State private var showPhotoViewer = false
+  @Environment(UserViewModel.self) private var userViewModel
+  let viewModel: ProfileViewModel
 
   var body: some View {
     VStack(alignment: .center, spacing: 16) {
@@ -340,6 +342,30 @@ struct ProfileHeaderView: View {
             .font(.subheadline)
             .foregroundColor(.gray)
         }
+      }
+
+      // Follow Button - Only show if not current user's profile
+      if let currentUserId = Auth.auth().currentUser?.uid,
+         user.id != currentUserId {
+        Button(action: {
+          Task {
+            await viewModel.toggleFollow()
+          }
+        }) {
+          Text(viewModel.followRequestSent ? "Requested" :
+               viewModel.isFollowing ? "Following" : "Follow")
+            .font(.subheadline.bold())
+            .foregroundColor(viewModel.isFollowing ? .gray : .white)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
+            .background(
+              viewModel.isFollowing
+                ? Color.gray.opacity(0.2)
+                : Color.blue
+            )
+            .clipShape(Capsule())
+        }
+        .disabled(viewModel.isLoading)
       }
     }
     .frame(maxWidth: .infinity)
@@ -412,7 +438,7 @@ struct DatingProfileSection: View {
           } label: {
             Image(systemName: isLiked == false ? "xmark.circle.fill" : "xmark.circle")
               .font(.system(size: 44))
-              .foregroundColor(isLiked == false ? .red : .gray)
+              .foregroundColor(isLiked == false ? .red : .gray.opacity(0.5))
           }
           .disabled(isLoading)
 
@@ -424,7 +450,7 @@ struct DatingProfileSection: View {
           } label: {
             Image(systemName: isLiked == true ? "checkmark.circle.fill" : "checkmark.circle")
               .font(.system(size: 44))
-              .foregroundColor(isLiked == true ? .green : .gray)
+              .foregroundColor(isLiked == true ? .green : .gray.opacity(0.5))
           }
           .disabled(isLoading)
 
@@ -546,13 +572,23 @@ struct DatingProfileSection: View {
       let db = Firestore.firestore()
       let currentUserId = Auth.auth().currentUser?.uid ?? ""
 
-      // Remove existing interaction if any
-      try await db.collection("likes")
+      // Check if documents exist before trying to delete
+      let likeDoc = try await db.collection("likes")
         .document("\(currentUserId)_\(userId)")
-        .delete()
-      try await db.collection("passes")
+        .getDocument()
+        
+      let passDoc = try await db.collection("passes")
         .document("\(currentUserId)_\(userId)")
-        .delete()
+        .getDocument()
+
+      // Only delete if documents exist
+      if likeDoc.exists {
+        try await likeDoc.reference.delete()
+      }
+      
+      if passDoc.exists {
+        try await passDoc.reference.delete()
+      }
 
       // Add new interaction
       if like {

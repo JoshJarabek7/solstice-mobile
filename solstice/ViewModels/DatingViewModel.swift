@@ -25,6 +25,7 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
   private var isReturningFromProfile = false
   private var lastProfileCount = 0
   private var seenProfileIds = Set<String>()  // Add set to track seen profiles
+  private var shownMatchIds = Set<String>()  // Add set to track shown matches
 
   var showMatchAlert = false
   var matchedUser: User?
@@ -52,6 +53,11 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
             let data = change.document.data()
             guard let likerId = data["likerId"] as? String else { continue }
             
+            // Skip if we've already shown this match
+            if self.shownMatchIds.contains(likerId) {
+              continue
+            }
+            
             // Check if we've also liked them
             Task {
               do {
@@ -75,6 +81,8 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
                   }
                   
                   await MainActor.run {
+                    // Add to shown matches before showing alert
+                    self.shownMatchIds.insert(likerId)
                     self.matchedUser = matchedUser
                     self.matchedChatId = matchChat?.documentID
                     self.showMatchAlert = true
@@ -607,6 +615,13 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
         try? await fetchProfiles()
       }
     }
+  }
+
+  // Add function to clear match state
+  func clearMatchState() {
+    showMatchAlert = false
+    matchedUser = nil
+    matchedChatId = nil
   }
 }
 

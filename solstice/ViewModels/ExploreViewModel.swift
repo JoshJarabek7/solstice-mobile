@@ -44,6 +44,11 @@ final class ExploreViewModel: ObservableObject {
   }
 
   func search(query: String) {
+    print("[DEBUG] -------- Explore Search Start --------")
+    print("[DEBUG] Query: '\(query)'")
+    print("[DEBUG] Current user ID: \(Auth.auth().currentUser?.uid ?? "nil")")
+    print("[DEBUG] Is user signed in: \(Auth.auth().currentUser != nil)")
+    
     // Cancel any existing search
     searchTask?.cancel()
 
@@ -54,39 +59,60 @@ final class ExploreViewModel: ObservableObject {
 
     searchTask = Task {
       isLoading = true
-      defer { isLoading = false }
+      defer { 
+        isLoading = false
+        print("[DEBUG] -------- Explore Search End --------")
+      }
 
       do {
-        // Search users with a simpler query that matches the index
+        print("[DEBUG] Starting user search")
+        let lowercaseQuery = query.lowercased()
+        
+        // Try a simple query first to test permissions
+        print("[DEBUG] Testing permissions with simple query")
+        let testQuery = try await db.collection("users")
+          .limit(to: 1)
+          .getDocuments()
+        print("[DEBUG] Permission test successful, got \(testQuery.documents.count) documents")
+        
+        // Search users with lowercase fields
+        print("[DEBUG] Searching users with query: '\(lowercaseQuery)'")
         let usersSnapshot = try await db.collection("users")
-          .whereField("username", isGreaterThanOrEqualTo: query.lowercased())
-          .whereField("username", isLessThan: query.lowercased() + "\u{f8ff}")
-          .order(by: "username")
+          .whereField("username_lowercase", isGreaterThanOrEqualTo: lowercaseQuery)
+          .whereField("username_lowercase", isLessThan: lowercaseQuery + "\u{f8ff}")
+          .order(by: "username_lowercase")
           .limit(to: 5)
           .getDocuments()
 
+        print("[DEBUG] User search returned \(usersSnapshot.documents.count) results")
+        
         let users = try usersSnapshot.documents.compactMap { doc -> User? in
-          try doc.data(as: User.self)
+          var data = doc.data()
+          data["id"] = doc.documentID
+          
+          // Handle nested ageRange structure
+          if let ageRange = data["ageRange"] as? [String: Any] {
+            data["ageRange.min"] = ageRange["min"] as? Int ?? 18
+            data["ageRange.max"] = ageRange["max"] as? Int ?? 100
+            data.removeValue(forKey: "ageRange")
+          }
+          
+          return try Firestore.Decoder().decode(User.self, from: data)
         }
+        print("[DEBUG] Successfully decoded \(users.count) users")
 
-        // Search hashtags
-        let hashtagsSnapshot = try await db.collection("hashtags")
-          .whereField("tag", isGreaterThanOrEqualTo: query.lowercased())
-          .whereField("tag", isLessThan: query.lowercased() + "\u{f8ff}")
-          .order(by: "tag")
-          .limit(to: 5)
-          .getDocuments()
-
-        let hashtags = hashtagsSnapshot.documents.compactMap { doc -> String in
-          doc.data()["tag"] as? String ?? ""
-        }
-
-        // Combine results
         if !Task.isCancelled {
-          searchResults = users.map { .user($0) } + hashtags.map { .hashtag($0) }
+          searchResults = users.map { .user($0) }
+          print("[DEBUG] Total results: \(searchResults.count)")
         }
       } catch {
-        print("Error searching users:", error)
+        print("[ERROR] Search failed with error: \(error)")
+        print("[ERROR] Error description: \(error.localizedDescription)")
+        if let firestoreError = error as NSError? {
+          print("[ERROR] Firestore error code: \(firestoreError.code)")
+          print("[ERROR] Firestore error domain: \(firestoreError.domain)")
+          print("[ERROR] Firestore error userInfo: \(firestoreError.userInfo)")
+        }
         errorMessage = "Failed to perform search: \(error.localizedDescription)"
       }
     }

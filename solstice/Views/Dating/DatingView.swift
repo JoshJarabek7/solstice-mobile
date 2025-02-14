@@ -100,6 +100,9 @@ struct DatingView: View {
           isLoading = false
         }
       }
+      .onDisappear {
+        viewModel.clearMatchState()
+      }
       .onChange(of: currentFilters) { _, newFilters in
         viewModel.filters = newFilters
         Task {

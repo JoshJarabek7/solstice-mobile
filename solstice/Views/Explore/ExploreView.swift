@@ -233,7 +233,8 @@ struct SearchResultCell: View {
       NavigationLink {
         ProfileViewContainer(userId: user.id ?? "unknown")
       } label: {
-        HStack {
+        HStack(spacing: 12) {
+          // User Avatar
           if let imageURL = user.profileImageURL {
             AsyncImage(url: URL(string: imageURL)) { image in
               image
@@ -241,20 +242,56 @@ struct SearchResultCell: View {
                 .scaledToFill()
             } placeholder: {
               Image(systemName: "person.circle.fill")
+                .foregroundColor(.gray)
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 50, height: 50)
             .clipShape(Circle())
+          } else {
+            Image(systemName: "person.circle.fill")
+              .resizable()
+              .frame(width: 50, height: 50)
+              .foregroundColor(.gray)
           }
 
-          VStack(alignment: .leading) {
+          // User Info
+          VStack(alignment: .leading, spacing: 4) {
             Text(user.username)
               .font(.headline)
+              .foregroundColor(.primary)
             Text(user.fullName)
               .font(.subheadline)
               .foregroundColor(.gray)
           }
+
+          Spacer()
+
+          // Follow Button
+          if let userId = user.id {
+            Button(action: {
+              Task {
+                do {
+                  try await viewModel.followUser(userId: userId)
+                } catch {
+                  print("[ERROR] Failed to follow user: \(error)")
+                }
+              }
+            }) {
+              Text(viewModel.isFollowing[userId] == true ? "Following" : "Follow")
+                .font(.subheadline.bold())
+                .foregroundColor(viewModel.isFollowing[userId] == true ? .gray : .white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                  viewModel.isFollowing[userId] == true
+                    ? Color.gray.opacity(0.2)
+                    : Color.blue
+                )
+                .clipShape(Capsule())
+            }
+          }
         }
         .padding(.horizontal)
+        .padding(.vertical, 8)
       }
 
     case .hashtag(let tag):

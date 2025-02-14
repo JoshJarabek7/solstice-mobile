@@ -53,7 +53,7 @@ final class MessagesViewModel {
   @ObservationIgnored private let db = Firestore.firestore()
   @ObservationIgnored private let listeners = SendableListeners()
   @ObservationIgnored private var authStateListener: AuthStateDidChangeListenerHandle?
-  @ObservationIgnored private var currentUserId: String = ""
+  var currentUserId: String = ""
 
   var chats: [Chat] = []
   var error: Error?

@@ -2,25 +2,33 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Base function to check if user is authenticated
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    // Videos and their thumbnails
-    match /videos/{videoId}/{filename} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-    
-    // User-specific files (profile images, etc)
-    match /users/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
-    }
-    
-    // Deny access to all other paths
+    // Allow read access to all files for authenticated users
     match /{allPaths=**} {
+      allow read: if request.auth != null;
+    }
+    
+    // Allow users to upload their own profile images
+    match /users/{userId}/profile/{fileName} {
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow users to upload their own dating profile images
+    match /users/{userId}/dating/{fileName} {
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow users to upload their own videos
+    match /users/{userId}/videos/{fileName} {
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow users to upload chat images/files
+    match /chats/{chatId}/{fileName} {
+      allow write: if request.auth != null;
+    }
+    
+    // Deny access to all other files by default
+    match /{remaining=**} {
       allow read, write: if false;
     }
   }

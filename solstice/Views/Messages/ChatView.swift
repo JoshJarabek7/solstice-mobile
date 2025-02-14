@@ -24,85 +24,91 @@ struct ChatView: View {
   }
 
   var body: some View {
-    mainView
-      .navigationTitle(chat.displayName)
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar { toolbarContent }
-      .task {
-        await viewModel.loadMessages()
+    Group {
+      if isSearching {
+        searchView
+      } else {
+        chatView
       }
-      .onDisappear {
+    }
+    .navigationTitle(chat.displayName(currentUserId: viewModel.currentUserId))
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar { toolbarContent }
+    .task {
+      await viewModel.loadMessages()
+    }
+    .onDisappear {
+      Task {
+        await viewModel.updateTypingStatus(isTyping: false)
+      }
+    }
+    .confirmationDialog(
+      "Message Options", isPresented: $showMessageOptions, presenting: selectedMessage
+    ) { message in
+      Button("Reply") {
+        replyingTo = message
+        isInputFocused = true
+      }
+      Button("React") {
+        showReactionPicker = true
+      }
+      Button("Hide Message") {
         Task {
-          await viewModel.updateTypingStatus(isTyping: false)
+          await viewModel.hideMessage(message)
         }
       }
-      .confirmationDialog(
-        "Message Options", isPresented: $showMessageOptions, presenting: selectedMessage
-      ) { message in
-        Button("Reply") {
-          replyingTo = message
-          isInputFocused = true
-        }
-        Button("React") {
-          showReactionPicker = true
-        }
-        Button("Hide Message") {
+      if message.senderId == viewModel.currentUserId {
+        Button("Delete Message", role: .destructive) {
           Task {
-            await viewModel.hideMessage(message)
-          }
-        }
-        if message.senderId == viewModel.currentUserId {
-          Button("Delete Message", role: .destructive) {
-            Task {
-              await viewModel.deleteMessage(message)
-            }
+            await viewModel.deleteMessage(message)
           }
         }
       }
-      .confirmationDialog(
-        "Add Reaction", isPresented: $showReactionPicker, presenting: selectedMessage
-      ) { message in
-        ForEach(commonReactions, id: \.self) { emoji in
-          Button(emoji) {
-            Task {
-              if message.hasReaction(emoji, by: viewModel.currentUserId) {
-                await viewModel.removeReaction(emoji, from: message)
-              } else {
-                await viewModel.addReaction(emoji, to: message)
-              }
-            }
-          }
-        }
-      }
-      .confirmationDialog("Chat Options", isPresented: $showChatOptions) {
-        Button("Clear Chat History") {
+    }
+    .confirmationDialog(
+      "Add Reaction", isPresented: $showReactionPicker, presenting: selectedMessage
+    ) { message in
+      ForEach(commonReactions, id: \.self) { emoji in
+        Button(emoji) {
           Task {
-            await viewModel.clearChatHistory()
-          }
-        }
-        if chat.isDatingChat {
-          Button("Unmatch", role: .destructive) {
-            Task {
-              await viewModel.unmatch()
-              dismiss()
-            }
-          }
-        } else if chat.isOwner(viewModel.currentUserId) {
-          Button("Delete Chat", role: .destructive) {
-            Task {
-              await viewModel.deleteChat()
-              dismiss()
-            }
-          }
-        } else {
-          Button("Delete Chat for Me", role: .destructive) {
-            Task {
-              await viewModel.deleteChatForMe()
-              dismiss()
+            if message.hasReaction(emoji, by: viewModel.currentUserId) {
+              await viewModel.removeReaction(emoji, from: message)
+            } else {
+              await viewModel.addReaction(emoji, to: message)
             }
           }
         }
       }
+    }
+    .confirmationDialog("Chat Options", isPresented: $showChatOptions) {
+      Button("Clear Chat History") {
+        Task {
+          await viewModel.clearChatHistory()
+        }
+      }
+      if chat.isDatingChat {
+        Button("Unmatch", role: .destructive) {
+          Task {
+            await viewModel.unmatch()
+            dismiss()
+          }
+        }
+      } else if chat.isOwner(viewModel.currentUserId) {
+        Button("Delete Chat", role: .destructive) {
+          Task {
+            await viewModel.deleteChat()
+            dismiss()
+          }
+        }
+      } else {
+        Button("Delete Chat for Me", role: .destructive) {
+          Task {
+            await viewModel.deleteChatForMe()
+            dismiss()
+          }
+        }
+      }
+    }
   }
 
   private var mainView: some View {

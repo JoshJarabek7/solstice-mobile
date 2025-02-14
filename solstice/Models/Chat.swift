@@ -1,6 +1,7 @@
 import FirebaseFirestore
 import Foundation
 import SwiftUI
+import FirebaseAuth
 
 enum ChatType: String, Codable {
   case regular
@@ -169,7 +170,7 @@ struct Chat: Identifiable, Codable {
     self.createdBy = createdBy
   }
 
-  var displayName: String {
+  func displayName(currentUserId: String? = nil) -> String {
     if isGroup {
       if let name = name {
         return name
@@ -183,8 +184,19 @@ struct Chat: Identifiable, Codable {
         }
       }
     } else {
+      // For 1-on-1 chats, show the other participant's name
+      if let currentUserId = currentUserId,
+         let otherUser = otherParticipant(currentUserId: currentUserId) {
+        return otherUser.username
+      }
       return participants.first?.username ?? ""
     }
+  }
+
+  // Helper method to get the other participant in a 1-on-1 chat
+  func otherParticipant(currentUserId: String) -> User? {
+    guard !isGroup else { return nil }
+    return participants.first { $0.id != currentUserId }
   }
 
   func isOwner(_ userId: String) -> Bool {
