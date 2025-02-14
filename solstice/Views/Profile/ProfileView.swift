@@ -355,7 +355,7 @@ struct DatingProfileSection: View {
   @State private var isLoading = false
   @State private var currentUser: User?
   @Environment(UserViewModel.self) private var userViewModel
-  
+
   private var canInteract: Bool {
     guard let currentUser = Auth.auth().currentUser else { return false }
     return currentUser.uid != user.id  // Not own profile
@@ -398,7 +398,7 @@ struct DatingProfileSection: View {
       }
       // Force view recreation when index changes
       .id("photoViewer_\(selectedPhotoIndex)")
-      
+
       // Like/Dislike Buttons
       if canInteract {
         HStack(spacing: 20) {
@@ -484,10 +484,10 @@ struct DatingProfileSection: View {
       }
     }
   }
-  
+
   private func listenToUserUpdates() {
     guard let userId = user.id else { return }
-    
+
     // Set up real-time listener for user document
     let db = Firestore.firestore()
     db.collection("users").document(userId)
@@ -496,7 +496,7 @@ struct DatingProfileSection: View {
           print("Error fetching user: \(error?.localizedDescription ?? "Unknown error")")
           return
         }
-        
+
         do {
           let updatedUser = try document.data(as: User.self)
           currentUser = updatedUser
@@ -505,7 +505,7 @@ struct DatingProfileSection: View {
         }
       }
   }
-  
+
   private func checkLikeStatus() async {
     guard canInteract, let userId = user.id else { return }
 

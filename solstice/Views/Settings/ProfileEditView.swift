@@ -1,7 +1,7 @@
+import FirebaseAuth
+import FirebaseFirestore
 import PhotosUI
 import SwiftUI
-import FirebaseFirestore
-import FirebaseAuth
 
 struct ProfileEditView: View {
   @Environment(UserViewModel.self) private var userViewModel
@@ -18,7 +18,7 @@ struct ProfileEditView: View {
     var username: String = ""
     var bio: String = ""
     var profileImageURL: String?
-    
+
     init(from user: User) {
       self.fullName = user.fullName
       self.username = user.username
@@ -29,7 +29,9 @@ struct ProfileEditView: View {
 
   init() {
     // Initialize with empty data - will be updated in onAppear
-    _localUser = State(initialValue: LocalUserData(from: User(username: "", email: "", fullName: "", gender: .other)))
+    _localUser = State(
+      initialValue: LocalUserData(from: User(username: "", email: "", fullName: "", gender: .other))
+    )
   }
 
   var body: some View {
@@ -89,22 +91,24 @@ struct ProfileEditView: View {
     .sheet(isPresented: $showBirthdayPicker) {
       if let userId = Auth.auth().currentUser?.uid {
         NavigationStack {
-          BirthdaySettingView(userId: userId, onSave: { date in
-            Task {
-              print("[DEBUG] Birthday saved, updating user model")
-              var updatedUser = userViewModel.user
-              updatedUser.birthday = date
-              userViewModel.user = updatedUser
-              do {
-                try await userViewModel.updateUser()
-                print("[DEBUG] User model updated successfully")
-              } catch {
-                print("[ERROR] Failed to update user model: \(error)")
-                errorMessage = "Birthday saved but profile update failed. Please try again."
-                showError = true
+          BirthdaySettingView(
+            userId: userId,
+            onSave: { date in
+              Task {
+                print("[DEBUG] Birthday saved, updating user model")
+                var updatedUser = userViewModel.user
+                updatedUser.birthday = date
+                userViewModel.user = updatedUser
+                do {
+                  try await userViewModel.updateUser()
+                  print("[DEBUG] User model updated successfully")
+                } catch {
+                  print("[ERROR] Failed to update user model: \(error)")
+                  errorMessage = "Birthday saved but profile update failed. Please try again."
+                  showError = true
+                }
               }
-            }
-          })
+            })
         }
       }
     }
@@ -144,7 +148,7 @@ struct ProfileEditView: View {
         updatedUser.username = localUser.username
         updatedUser.bio = localUser.bio.isEmpty ? nil : localUser.bio
         updatedUser.profileImageURL = localUser.profileImageURL
-        
+
         // Update the UserViewModel
         userViewModel.user = updatedUser
         try await userViewModel.updateUser()
@@ -161,12 +165,13 @@ private struct BirthdaySettingView: View {
   @Environment(\.dismiss) private var dismiss
   let userId: String
   let onSave: (Date) -> Void
-  
-  @State private var selectedDate = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+
+  @State private var selectedDate =
+    Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
   @State private var showError = false
   @State private var errorMessage = ""
   @State private var isSaving = false
-  
+
   var body: some View {
     VStack(spacing: 20) {
       DatePicker(
@@ -177,12 +182,12 @@ private struct BirthdaySettingView: View {
       )
       .datePickerStyle(.wheel)
       .padding()
-      
+
       if isSaving {
         ProgressView()
           .padding()
       }
-      
+
       Button(action: saveDate) {
         Text("Save")
           .frame(maxWidth: .infinity)
@@ -193,7 +198,7 @@ private struct BirthdaySettingView: View {
       }
       .disabled(isSaving)
       .padding(.horizontal)
-      
+
       Spacer()
     }
     .navigationTitle("Set Birthday")
@@ -211,7 +216,7 @@ private struct BirthdaySettingView: View {
       Text(errorMessage)
     }
   }
-  
+
   private func saveDate() {
     guard !isSaving else { return }
     guard !userId.isEmpty else {
@@ -219,20 +224,20 @@ private struct BirthdaySettingView: View {
       showError = true
       return
     }
-    
+
     isSaving = true
-    
+
     Task {
       do {
         let data: [String: Any] = [
           "birthday": Timestamp(date: selectedDate)
         ]
-        
+
         try await Firestore.firestore()
           .collection("users")
           .document(userId)
           .updateData(data)
-        
+
         await MainActor.run {
           onSave(selectedDate)
           dismiss()
