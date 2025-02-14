@@ -10,6 +10,7 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
   private var lastDocument: DocumentSnapshot?
   private let locationManager: CLLocationManager
   private var isInitialized = false
+  private var isFetching = false  // Add fetching flag
 
   var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
   var currentLocation: CLLocation?
@@ -23,16 +24,106 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
   // Track if we're returning from profile view
   private var isReturningFromProfile = false
   private var lastProfileCount = 0
+  private var seenProfileIds = Set<String>()  // Add set to track seen profiles
+
+  var showMatchAlert = false
+  var matchedUser: User?
+  var matchedChatId: String?
 
   override init() {
     self.locationManager = CLLocationManager()
     super.init()
     setupLocationManager()
+    setupMatchListener()
+  }
+
+  private func setupMatchListener() {
+    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+    
+    // Listen for likes where current user is the liked person
+    database.collection("likes")
+      .whereField("likedId", isEqualTo: currentUserId)
+      .addSnapshotListener { [weak self] snapshot, error in
+        guard let self = self,
+              let snapshot = snapshot else { return }
+        
+        for change in snapshot.documentChanges {
+          if change.type == .added {
+            let data = change.document.data()
+            guard let likerId = data["likerId"] as? String else { continue }
+            
+            // Check if we've also liked them
+            Task {
+              do {
+                let ourLikeDoc = try await self.database.collection("likes")
+                  .document("\(currentUserId)_\(likerId)")
+                  .getDocument()
+                
+                if ourLikeDoc.exists {
+                  // It's a match! Get the user profile
+                  let matchedUser = try await self.fetchUser(userId: likerId)
+                  
+                  // Find the chat that was created for this match
+                  let chats = try await self.database.collection("chats")
+                    .whereField("participantIds", arrayContains: currentUserId)
+                    .whereField("isDatingChat", isEqualTo: true)
+                    .getDocuments()
+                  
+                  let matchChat = chats.documents.first { doc in
+                    let participantIds = doc.data()["participantIds"] as? [String] ?? []
+                    return participantIds.contains(likerId)
+                  }
+                  
+                  await MainActor.run {
+                    self.matchedUser = matchedUser
+                    self.matchedChatId = matchChat?.documentID
+                    self.showMatchAlert = true
+                  }
+                }
+              } catch {
+                print("[ERROR] Error checking for match: \(error)")
+              }
+            }
+          }
+        }
+      }
+  }
+
+  private func fetchUser(userId: String) async throws -> User {
+    print("[DEBUG] Fetching user with ID: \(userId)")
+    let userDoc = try await database.collection("users").document(userId).getDocument()
+    
+    guard var userData = userDoc.data() else {
+      print("[ERROR] No data found for user: \(userId)")
+      throw DatingError.userNotFound
+    }
+    
+    // Add the document ID to the user data
+    userData["id"] = userId
+    
+    // Handle nested ageRange structure
+    if let ageRange = userData["ageRange"] as? [String: Any] {
+      userData["ageRange.min"] = ageRange["min"] as? Int ?? 18
+      userData["ageRange.max"] = ageRange["max"] as? Int ?? 100
+      userData.removeValue(forKey: "ageRange")
+    }
+    
+    // Convert boolean fields from numbers if necessary
+    if let isDatingEnabled = userData["isDatingEnabled"] as? Int {
+      userData["isDatingEnabled"] = isDatingEnabled != 0
+    }
+    if let isPrivate = userData["isPrivate"] as? Int {
+      userData["isPrivate"] = isPrivate != 0
+    }
+    
+    let decoder = Firestore.Decoder()
+    return try decoder.decode(User.self, from: userData)
   }
 
   func initialize() async throws {
     guard !isInitialized else { return }
     isInitialized = true
+    seenProfileIds.removeAll()  // Clear seen profiles on initialize
     try await fetchProfiles()
   }
 
@@ -50,6 +141,7 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
       profiles.removeAll()
       cardOffsets.removeAll()
       cardRotations.removeAll()
+      seenProfileIds.removeAll()  // Clear seen profiles on refresh
     } else {
       isReturningFromProfile = false
     }
@@ -207,8 +299,20 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
     return true
   }
 
-  func fetchProfiles() async throws {
+  private func fetchProfiles() async throws {
     print("[DEBUG] Starting profile fetch")
+    
+    // Prevent concurrent fetches
+    guard !isFetching else {
+      print("[DEBUG] Fetch already in progress, skipping")
+      return
+    }
+    
+    isFetching = true
+    
+    defer {
+      isFetching = false
+    }
 
     // Get current user ID
     guard let currentUserId = Auth.auth().currentUser?.uid else {
@@ -247,6 +351,20 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
     print("[DEBUG] Current location: \(location)")
 
     do {
+      // Get already liked profiles
+      let likedProfiles = try await database.collection("likes")
+        .whereField("likerId", isEqualTo: currentUserId)
+        .getDocuments()
+      let likedIds = Set(likedProfiles.documents.compactMap { $0.data()["likedId"] as? String })
+      
+      // Get passed profiles
+      let passedProfiles = try await database.collection("passes")
+        .whereField("passerId", isEqualTo: currentUserId)
+        .getDocuments()
+      let passedIds = Set(passedProfiles.documents.compactMap { $0.data()["passedId"] as? String })
+      
+      print("[DEBUG] Found \(likedIds.count) liked and \(passedIds.count) passed profiles")
+
       // Build and execute query
       let query = buildDatingQuery(currentUserGender: currentUserGender)
       let snapshot = try await query.limit(to: 50).getDocuments()
@@ -258,38 +376,48 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
       let newProfiles = snapshot.documents.compactMap { doc -> User? in
         var userData = doc.data()
         userData["id"] = doc.documentID
+        
+        // Skip if we've already interacted with this profile
+        guard !likedIds.contains(doc.documentID) && !passedIds.contains(doc.documentID) else {
+          print("[DEBUG] Skipping previously interacted profile: \(doc.documentID)")
+          return nil
+        }
+
+        // Skip if we've already seen this profile in this session
+        guard !seenProfileIds.contains(doc.documentID) else {
+          print("[DEBUG] Skipping already seen profile: \(doc.documentID)")
+          return nil
+        }
 
         guard filterProfile(userData, currentUserId: currentUserId, userLocation: location) else {
           return nil
         }
 
-        return try? decoder.decode(User.self, from: userData)
+        // Add to seen profiles if successfully decoded
+        if let user = try? decoder.decode(User.self, from: userData) {
+          seenProfileIds.insert(doc.documentID)
+          return user
+        }
+        return nil
       }
 
       print("[DEBUG] Successfully filtered and decoded \(newProfiles.count) profiles")
 
       // Update profiles
-      if self.profiles.isEmpty {
-        self.profiles = newProfiles
-      } else {
-        self.profiles.append(contentsOf: newProfiles)
+      await MainActor.run {
+        if self.profiles.isEmpty {
+          self.profiles = newProfiles
+        } else {
+          self.profiles.append(contentsOf: newProfiles)
+        }
+
+        print("[DEBUG] Total profiles in view model: \(self.profiles.count)")
+
+        // Update card states
+        self.cardOffsets = Array(repeating: .zero, count: self.profiles.count)
+        self.cardRotations = Array(repeating: .zero, count: self.profiles.count)
       }
 
-      print("[DEBUG] Total profiles in view model: \(self.profiles.count)")
-
-      // Remove any duplicates and update card states
-      self.profiles = Array(
-        Dictionary(grouping: self.profiles, by: { $0.id }).values.map { $0.first! })
-      print("[DEBUG] After removing duplicates: \(self.profiles.count) unique profiles")
-
-      // Update card states
-      self.cardOffsets = Array(repeating: .zero, count: self.profiles.count)
-      self.cardRotations = Array(repeating: .zero, count: self.profiles.count)
-
-      // No need to throw error for empty profiles - the view will handle this case
-      if self.profiles.isEmpty {
-        print("[DEBUG] No profiles available after filtering")
-      }
     } catch {
       print("[ERROR] Failed to fetch profiles: \(error)")
       throw error
@@ -369,79 +497,67 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
 
   // MARK: - Profile Actions
   
-  private func createMatch(with profile: User) async throws {
-    guard let currentUserId = Auth.auth().currentUser?.uid,
-      let profileId = profile.id
-    else { return }
-
-    let matchData: [String: Any] = [
-      "users": [currentUserId, profileId],
-      "timestamp": FieldValue.serverTimestamp(),
-    ]
-
-    let chatData: [String: Any] = [
-      "participants": [currentUserId, profileId],
-      "lastMessage": NSNull(),
-      "lastMessageTimestamp": FieldValue.serverTimestamp(),
-      "createdAt": FieldValue.serverTimestamp(),
-      "type": "dating", // Add chat type to distinguish dating matches
-    ]
-
-    // Create a new match document
-    let matchRef = try await database.collection("matches").addDocument(data: matchData)
-
-    // Create a chat for the match
-    let chatRef = try await database.collection("chats").addDocument(data: chatData)
-
-    // Add chat reference to match
-    try await matchRef.updateData(["chatId": chatRef.documentID])
-
-    // Send match notification
-    let notificationData: [String: Any] = [
-      "type": "match",
-      "fromUserId": currentUserId,
-      "toUserId": profileId,
-      "matchId": matchRef.documentID,
-      "chatId": chatRef.documentID,
-      "timestamp": FieldValue.serverTimestamp(),
-      "read": false
-    ]
-    
-    try await database.collection("notifications").addDocument(data: notificationData)
-  }
-
   func likeProfile(_ profile: User) async {
-    guard let currentUserId = Auth.auth().currentUser?.uid else { return }
-
+    guard let currentUserId = Auth.auth().currentUser?.uid,
+          let profileId = profile.id else { return }
+    
+    print("[DEBUG] Liking profile: \(profileId)")
+    
     do {
-      print("[DEBUG] Liking profile: \(profile.id ?? "unknown")")
-      
-      // Add like to Firestore
+      // Add like to database
       try await database.collection("likes")
-        .document("\(currentUserId)_\(profile.id!)")
+        .document("\(currentUserId)_\(profileId)")
         .setData([
           "likerId": currentUserId,
-          "likedId": profile.id!,
-          "timestamp": FieldValue.serverTimestamp(),
+          "likedId": profileId,
+          "timestamp": FieldValue.serverTimestamp()
         ])
-
-      // Check for mutual like (match)
-      let mutualLike = try await database.collection("likes")
-        .document("\(profile.id!)_\(currentUserId)")
+      
+      print("[DEBUG] Successfully added like to database")
+      
+      // Check if they've also liked us
+      let theirLikeDoc = try await database.collection("likes")
+        .document("\(profileId)_\(currentUserId)")
         .getDocument()
-
-      if mutualLike.exists {
-        print("[DEBUG] Found mutual like - creating match")
-        // Create a match
-        try await createMatch(with: profile)
+      
+      if theirLikeDoc.exists {
+        print("[DEBUG] Match found! Creating chat...")
+        // It's a match! Create a chat
+        let chatRef = database.collection("chats").document()
+        let timestamp = Timestamp(date: Date())
         
-        // Notify the UI of the match
+        let chatData: [String: Any] = [
+          "participantIds": [currentUserId, profileId],
+          "lastActivity": timestamp,
+          "isGroup": false,
+          "isDatingChat": true,
+          "unreadCounts": [
+            currentUserId: 0,
+            profileId: 0
+          ],
+          "deletedForUsers": [],
+          "hiddenMessagesForUsers": [:],
+          "typingUsers": [],
+          "createdAt": timestamp,
+          "createdBy": currentUserId
+        ]
+        
+        // Create the chat document first
+        try await chatRef.setData(chatData)
+        print("[DEBUG] Created new chat: \(chatRef.documentID)")
+        
+        // Verify the chat was created and is properly initialized
+        let chatDoc = try await chatRef.getDocument()
+        guard chatDoc.exists else {
+          print("[ERROR] Chat document not found after creation")
+          return
+        }
+        
+        // Show match alert
         await MainActor.run {
-          // Find the card view and show match alert
-          if let _ = profiles.firstIndex(where: { $0.id == profile.id }) {
-            // The card view will show the match alert
-            print("[DEBUG] Match created successfully")
-          }
+          self.matchedUser = profile
+          self.matchedChatId = chatRef.documentID
+          self.showMatchAlert = true
         }
       }
     } catch {
@@ -456,13 +572,14 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
       print("[DEBUG] Passing profile: \(profile.id ?? "unknown")")
       
       // Record the pass in Firestore
-      try await database.collection("passes")
-        .document("\(currentUserId)_\(profile.id!)")
-        .setData([
-          "passerId": currentUserId,
-          "passedId": profile.id!,
-          "timestamp": FieldValue.serverTimestamp(),
-        ])
+      let passRef = database.collection("passes").document("\(currentUserId)_\(profile.id!)")
+      try await passRef.setData([
+        "passerId": currentUserId,
+        "passedId": profile.id!,
+        "timestamp": FieldValue.serverTimestamp(),
+      ])
+      
+      print("[DEBUG] Successfully added pass to database")
     } catch {
       print("[ERROR] Error passing profile: \(error)")
     }
@@ -474,6 +591,9 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
 
   @MainActor
   func removeProfile(at index: Int) async {
+    guard index < profiles.count else { return }
+    
+    print("[DEBUG] Removing profile at index: \(index)")
     withAnimation {
       profiles.remove(at: index)
       cardOffsets.remove(at: index)
@@ -482,6 +602,7 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
     
     // Fetch more profiles if running low
     if profiles.count < 3 {
+      print("[DEBUG] Profile count low (\(profiles.count)), fetching more profiles")
       Task {
         try? await fetchProfiles()
       }

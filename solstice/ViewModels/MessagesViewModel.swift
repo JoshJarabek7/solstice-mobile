@@ -48,25 +48,34 @@ final class SendableListeners {
 @MainActor
 @Observable
 final class MessagesViewModel {
+  static let shared = MessagesViewModel()
+  
   @ObservationIgnored private let db = Firestore.firestore()
   @ObservationIgnored private let listeners = SendableListeners()
   @ObservationIgnored private var authStateListener: AuthStateDidChangeListenerHandle?
   @ObservationIgnored private var currentUserId: String = ""
 
-  var regularChats: [Chat] = [] {
-    didSet {
-      print("[DEBUG] Regular chats updated, count: \(regularChats.count)")
-      if let lastChat = regularChats.first {
-        print("[DEBUG] First chat last message: \(lastChat.lastMessage?.content ?? "nil")")
-      }
-    }
-  }
-  var groupChats: [Chat] = []
-  var datingChats: [Chat] = []
-  var isLoading = false
+  var chats: [Chat] = []
   var error: Error?
-  var errorMessage: String?
+  var isLoading = false
+  
+  var regularChats: [Chat] {
+    chats.filter { !$0.isGroup && !$0.isDatingChat }
+      .sorted { $0.lastActivity > $1.lastActivity }
+  }
+  
+  var groupChats: [Chat] {
+    chats.filter { $0.isGroup }
+      .sorted { $0.lastActivity > $1.lastActivity }
+  }
+  
+  var datingChats: [Chat] {
+    chats.filter { $0.isDatingChat }
+      .sorted { $0.lastActivity > $1.lastActivity }
+  }
+  
   var isAuthenticated = false
+  var errorMessage: String?
 
   private func fetchUser(id userId: String) async throws -> User {
     let userDoc = try await db.collection("users").document(userId).getDocument()
@@ -113,9 +122,7 @@ final class MessagesViewModel {
         } else {
           self.currentUserId = ""
           self.isAuthenticated = false
-          self.regularChats = []
-          self.groupChats = []
-          self.datingChats = []
+          self.chats = []
           print("[DEBUG] Auth state changed - user signed out")
         }
       }
@@ -154,10 +161,9 @@ final class MessagesViewModel {
         "[DEBUG] Fetched chats - Regular: \(regularResults.count), Group: \(groupResults.count), Dating: \(datingResults.count)"
       )
 
-      // Update the chat arrays
-      self.regularChats = regularResults
-      self.groupChats = groupResults
-      self.datingChats = datingResults
+      // Update the chats array with all results
+      self.chats = (regularResults + groupResults + datingResults)
+        .sorted { $0.lastActivity > $1.lastActivity }
 
       // Setup real-time listeners for future updates
       print("[DEBUG] Setting up real-time listeners")
@@ -363,38 +369,104 @@ final class MessagesViewModel {
   }
 
   // Update fetchLatestChats to use the new processing function
+  @MainActor
   private func fetchLatestChats(isDating: Bool, isGroup: Bool) async throws -> [Chat] {
     print("[DEBUG] Fetching \(isDating ? "dating" : isGroup ? "group" : "regular") chats")
     print("[DEBUG] Current user ID: \(currentUserId)")
 
     let query = db.collection("chats")
       .whereField("participantIds", arrayContains: currentUserId)
-      .whereField("isDatingChat", isEqualTo: isDating)
       .whereField("isGroup", isEqualTo: isGroup)
+      .whereField("isDatingChat", isEqualTo: isDating)
+      .whereField("deletedForUsers", notIn: [currentUserId])
       .order(by: "lastActivity", descending: true)
       .limit(to: 50)
 
     print("[DEBUG] Executing query: \(query)")
+
     let snapshot = try await query.getDocuments()
     print("[DEBUG] Found \(snapshot.documents.count) documents")
 
-    var updatedChats: [Chat] = []
-
-    for document in snapshot.documents {
-      if let chat = try await processDocument(document) {
-        updatedChats.append(chat)
+    let chats = try await withThrowingTaskGroup(of: Chat?.self) { group in
+      for document in snapshot.documents {
+        let documentData = document.data()
+        let documentId = document.documentID
+        
+        group.addTask {
+          do {
+            // Get participant data
+            let participantIds = documentData["participantIds"] as? [String] ?? []
+            let participants = try await withThrowingTaskGroup(of: User?.self) { group in
+              for id in participantIds {
+                group.addTask {
+                  try await Task { @MainActor in
+                    try await self.fetchUser(id: id)
+                  }.value
+                }
+              }
+              var users: [User] = []
+              for try await user in group {
+                if let user = user {
+                  users.append(user)
+                }
+              }
+              return users
+            }
+            
+            // Create chat object
+            var chat = Chat(
+              id: documentId,
+              participants: participants,
+              lastActivity: (documentData["lastActivity"] as? Timestamp)?.dateValue() ?? Date(),
+              isGroup: documentData["isGroup"] as? Bool ?? false,
+              name: documentData["name"] as? String,
+              unreadCounts: documentData["unreadCounts"] as? [String: Int] ?? [:],
+              isDatingChat: documentData["isDatingChat"] as? Bool ?? false,
+              ownerId: documentData["createdBy"] as? String,
+              lastMessage: nil,
+              deletedForUsers: documentData["deletedForUsers"] as? [String] ?? [],
+              hiddenMessagesForUsers: documentData["hiddenMessagesForUsers"] as? [String: [String]] ?? [:],
+              typingUsers: documentData["typingUsers"] as? [String] ?? [],
+              createdAt: (documentData["createdAt"] as? Timestamp)?.dateValue(),
+              createdBy: documentData["createdBy"] as? String
+            )
+            
+            // Get last message if it exists
+            if let lastMessageData = documentData["lastMessage"] as? [String: Any] {
+              chat.lastMessage = Message(
+                id: lastMessageData["id"] as? String,
+                senderId: lastMessageData["senderId"] as? String ?? "",
+                content: lastMessageData["content"] as? String ?? "",
+                timestamp: (lastMessageData["timestamp"] as? Timestamp)?.dateValue() ?? Date(),
+                type: Message.MessageType(rawValue: lastMessageData["type"] as? String ?? "text") ?? .text,
+                metadata: nil,
+                reactions: lastMessageData["reactions"] as? [String: [String]] ?? [:],
+                replyTo: lastMessageData["replyTo"] as? String,
+                replyPreview: nil,
+                readBy: lastMessageData["readBy"] as? [String] ?? [],
+                deliveredTo: lastMessageData["deliveredTo"] as? [String] ?? []
+              )
+            }
+            
+            return chat
+          } catch {
+            print("[ERROR] Error processing chat document: \(error)")
+            return nil
+          }
+        }
       }
+      
+      var chats: [Chat] = []
+      for try await chat in group {
+        if let chat = chat {
+          chats.append(chat)
+        }
+      }
+      return chats.sorted { $0.lastActivity > $1.lastActivity }
     }
 
-    // Sort the chats by lastActivity
-    updatedChats.sort { chat1, chat2 in
-      let date1 = chat1.lastMessage?.timestamp ?? chat1.lastActivity
-      let date2 = chat2.lastMessage?.timestamp ?? chat2.lastActivity
-      return date1 > date2
-    }
-
-    print("[DEBUG] Returning \(updatedChats.count) chats")
-    return updatedChats
+    print("[DEBUG] Returning \(chats.count) chats")
+    return chats
   }
 
   // Update setupChatListener to use the new processing function
@@ -496,79 +568,21 @@ final class MessagesViewModel {
   }
 
   private func addChat(_ chat: Chat) {
-    Task { @MainActor in
-      if chat.isDatingChat {
-        if !datingChats.contains(where: { $0.id == chat.id }) {
-          var chats = datingChats
-          chats.append(chat)
-          chats.sort { $0.lastActivity > $1.lastActivity }
-          datingChats = chats
-        }
-      } else if chat.isGroup {
-        if !groupChats.contains(where: { $0.id == chat.id }) {
-          var chats = groupChats
-          chats.append(chat)
-          chats.sort { $0.lastActivity > $1.lastActivity }
-          groupChats = chats
-        }
-      } else {
-        if !regularChats.contains(where: { $0.id == chat.id }) {
-          var chats = regularChats
-          chats.append(chat)
-          chats.sort { $0.lastActivity > $1.lastActivity }
-          regularChats = chats
-        }
-      }
+    if !chats.contains(where: { $0.id == chat.id }) {
+      chats.append(chat)
+      chats.sort { $0.lastActivity > $1.lastActivity }
     }
   }
 
   private func updateChat(_ updatedChat: Chat) {
-    print(
-      "[DEBUG] Updating chat: \(updatedChat.id ?? "unknown") with last message: \(updatedChat.lastMessage?.content ?? "nil")"
-    )
-
-    Task { @MainActor in
-      if updatedChat.isDatingChat {
-        if let index = datingChats.firstIndex(where: { $0.id == updatedChat.id }) {
-          var chats = datingChats
-          chats.remove(at: index)
-          chats.insert(updatedChat, at: 0)
-          datingChats = chats
-          print(
-            "[DEBUG] Updated dating chat with message: \(updatedChat.lastMessage?.content ?? "nil")"
-          )
-        }
-      } else if updatedChat.isGroup {
-        if let index = groupChats.firstIndex(where: { $0.id == updatedChat.id }) {
-          var chats = groupChats
-          chats.remove(at: index)
-          chats.insert(updatedChat, at: 0)
-          groupChats = chats
-          print(
-            "[DEBUG] Updated group chat with message: \(updatedChat.lastMessage?.content ?? "nil")")
-        }
-      } else {
-        if let index = regularChats.firstIndex(where: { $0.id == updatedChat.id }) {
-          var chats = regularChats
-          chats.remove(at: index)
-          chats.insert(updatedChat, at: 0)
-          regularChats = chats
-          print(
-            "[DEBUG] Updated regular chat with message: \(updatedChat.lastMessage?.content ?? "nil")"
-          )
-        }
-      }
+    if let index = chats.firstIndex(where: { $0.id == updatedChat.id }) {
+      chats.remove(at: index)
+      chats.insert(updatedChat, at: 0)
     }
   }
 
   private func removeChat(_ chat: Chat) {
-    if chat.isDatingChat {
-      datingChats.removeAll { $0.id == chat.id }
-    } else if chat.isGroup {
-      groupChats.removeAll { $0.id == chat.id }
-    } else {
-      regularChats.removeAll { $0.id == chat.id }
-    }
+    chats.removeAll { $0.id == chat.id }
   }
 
   private func findExistingChat(with participants: [User], isDating: Bool = false) async throws
@@ -842,79 +856,65 @@ final class MessagesViewModel {
     let userId = currentUserId
     let timestamp = Date()
 
-    try await Task.detached {
-      // Create message document first to get its ID
-      let messageRef = Firestore.firestore().collection("chats").document(chatId).collection(
-        "messages"
-      ).document()
-      let messageId = messageRef.documentID
+    // Create message document first to get its ID
+    let messageRef = db.collection("chats").document(chatId).collection("messages").document()
+    let messageId = messageRef.documentID
 
-      // Create message data with all required fields
-      let messageData: [String: Any] = [
-        "id": messageId,
-        "content": message.content,
-        "senderId": message.senderId,
-        "timestamp": Timestamp(date: timestamp),
-        "type": message.type.rawValue,
-        "readBy": [message.senderId],
-        "deliveredTo": [message.senderId],
-        "reactions": [:],
-        "metadata": message.metadata?.asDictionary() as Any,
-        "replyTo": message.replyTo as Any,
-        "replyPreview": message.replyPreview?.asDictionary() as Any,
-      ]
+    // Create message data with all required fields
+    let messageData: [String: Any] = [
+      "id": messageId,
+      "content": message.content,
+      "senderId": message.senderId,
+      "timestamp": Timestamp(date: timestamp),
+      "type": message.type.rawValue,
+      "readBy": [message.senderId],
+      "deliveredTo": [message.senderId],
+      "reactions": [:],
+      "metadata": message.metadata?.asDictionary() as Any,
+      "replyTo": message.replyTo as Any,
+      "replyPreview": message.replyPreview?.asDictionary() as Any,
+    ]
 
-      // Batch write to ensure atomicity
-      let batch = Firestore.firestore().batch()
+    // Batch write to ensure atomicity
+    let batch = db.batch()
 
-      // Add message to messages collection
-      batch.setData(messageData, forDocument: messageRef)
+    // Add message to messages collection
+    batch.setData(messageData, forDocument: messageRef)
 
-      // Update chat document with the new lastMessage
-      let chatRef = Firestore.firestore().collection("chats").document(chatId)
-      let chatUpdateData: [String: Any] = [
-        "lastMessage": messageData,
-        "lastActivity": Timestamp(date: timestamp),
-        "unreadCounts.\(userId)": 0,
-      ]
+    // Update chat document with the new lastMessage
+    let chatRef = db.collection("chats").document(chatId)
+    let chatUpdateData: [String: Any] = [
+      "lastMessage": messageData,
+      "lastActivity": Timestamp(date: timestamp),
+      "unreadCounts.\(userId)": 0,
+    ]
 
-      // Update unread counts for other participants
-      let otherParticipantIds = chat.participants
-        .compactMap { $0.id }
-        .filter { $0 != userId }
+    // Update unread counts for other participants
+    let otherParticipantIds = chat.participants
+      .compactMap { $0.id }
+      .filter { $0 != userId }
 
-      // Update the chat document
-      batch.updateData(chatUpdateData, forDocument: chatRef)
+    // Update the chat document
+    batch.updateData(chatUpdateData, forDocument: chatRef)
 
-      // Update unread counts for other participants
-      for participantId in otherParticipantIds {
-        batch.updateData(
-          ["unreadCounts.\(participantId)": FieldValue.increment(Int64(1))], forDocument: chatRef)
-      }
+    // Update unread counts for other participants
+    for participantId in otherParticipantIds {
+      batch.updateData(
+        ["unreadCounts.\(participantId)": FieldValue.increment(Int64(1))], forDocument: chatRef)
+    }
 
-      // Commit all changes atomically
-      try await batch.commit()
+    // Commit all changes atomically
+    try await batch.commit()
 
-      // Force a refresh of the chat list to update the UI
-      let _ = await MainActor.run {
-        Task {
-          await self.loadChats()
+    // Update the local chat object
+    var updatedChat = chat
+    updatedChat.lastMessage = message
+    updatedChat.lastActivity = timestamp
 
-          // Force UI refresh by temporarily clearing and restoring the chat arrays
-          let tempRegular = self.regularChats
-          let tempGroup = self.groupChats
-          let tempDating = self.datingChats
-
-          self.regularChats = []
-          self.groupChats = []
-          self.datingChats = []
-
-          self.regularChats = tempRegular
-          self.groupChats = tempGroup
-          self.datingChats = tempDating
-        }
-      }
-    }.value
+    // Update the chats array
+    await MainActor.run {
+      updateChat(updatedChat)
+    }
   }
 
   // New function to actually create the chat in Firebase when first message is sent
@@ -990,47 +990,17 @@ final class MessagesViewModel {
       senderId: firstMessage.senderId
     )
 
-    // Perform database operations in a detached task to avoid actor isolation issues
-    try await Task.detached { @Sendable in
-      // Create chat document
-      try await Firestore.firestore().collection("chats").document(isolatedData.chatId).setData(
-        isolatedData.chatData.asDictionary)
-
-      // Add message to messages subcollection
-      try await Firestore.firestore().collection("chats")
-        .document(isolatedData.chatId)
-        .collection("messages")
-        .document(isolatedData.messageData.id)
-        .setData(isolatedData.messageData.asDictionary)
-
-      // Create update data for the chat document
-      var updateData: [String: Any] = [
-        "lastMessage": isolatedData.messageData.asDictionary,
-        "lastActivity": Timestamp(date: Date()),
-      ]
-
-      // Update unread counts
-      for participantId in isolatedData.participantIds {
-        if participantId != isolatedData.senderId {
-          updateData["unreadCounts.\(participantId)"] = FieldValue.increment(Int64(1))
-        } else {
-          updateData["unreadCounts.\(participantId)"] = 0
-        }
-      }
-
-      // Update chat document
-      try await Firestore.firestore().collection("chats").document(isolatedData.chatId).updateData(
-        updateData)
-    }.value
+    // Perform database operations
+    try await performDatabaseOperations(isolatedData)
 
     // Create a new chat object with the updated data
     var updatedChat = chat
     updatedChat.lastMessage = firstMessage
     updatedChat.lastActivity = Date()
 
-    // Trigger a refresh of the chat list
-    Task { @MainActor in
-      await loadChats()
+    // Update the chats array
+    await MainActor.run {
+      updateChat(updatedChat)
     }
 
     return updatedChat
@@ -1050,6 +1020,46 @@ final class MessagesViewModel {
       "lastActivity": Timestamp(date: Date()),
       "lastMessage": messageData,
     ])
+  }
+
+  // Update the force refresh code
+  private func forceUIRefresh() {
+    let tempChats = chats
+    chats.removeAll()
+    chats = tempChats
+  }
+
+  // Update the Task.detached call
+  private func performDatabaseOperations(_ isolatedData: IsolatedData) async throws {
+    // Create chat document
+    try await Firestore.firestore().collection("chats").document(isolatedData.chatId).setData(
+      isolatedData.chatData.asDictionary)
+
+    // Add message to messages subcollection
+    try await Firestore.firestore().collection("chats")
+      .document(isolatedData.chatId)
+      .collection("messages")
+      .document(isolatedData.messageData.id)
+      .setData(isolatedData.messageData.asDictionary)
+
+    // Create update data for the chat document
+    var updateData: [String: Any] = [
+      "lastMessage": isolatedData.messageData.asDictionary,
+      "lastActivity": Timestamp(date: Date()),
+    ]
+
+    // Update unread counts
+    for participantId in isolatedData.participantIds {
+      if participantId != isolatedData.senderId {
+        updateData["unreadCounts.\(participantId)"] = FieldValue.increment(Int64(1))
+      } else {
+        updateData["unreadCounts.\(participantId)"] = 0
+      }
+    }
+
+    // Update chat document
+    try await Firestore.firestore().collection("chats").document(isolatedData.chatId).updateData(
+      updateData)
   }
 }
 

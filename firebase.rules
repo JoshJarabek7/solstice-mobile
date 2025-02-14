@@ -8,7 +8,7 @@ service cloud.firestore {
     
     function isUserInChat(chatData) {
       return isSignedIn() &&
-        (chatData.participants.hasAny([request.auth.uid]) ||
+        (chatData.participantIds.hasAny([request.auth.uid]) ||
          request.auth.uid in chatData.participantIds);
     }
     
@@ -30,7 +30,9 @@ service cloud.firestore {
       // During development, allow creation without auth check
       allow create: if true;  // More permissive during development
       allow read: if true;    // More permissive during development
-      allow update: if request.auth != null && request.auth.uid == userId;
+      allow update: if isSignedIn() && 
+        (request.auth.uid == userId || 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chats']));
       allow delete: if request.auth != null && request.auth.uid == userId;
       
       // Add rules for likedVideos subcollection
@@ -64,8 +66,18 @@ service cloud.firestore {
          resource.data.ownerId == request.auth.uid);
       
       match /messages/{messageId} {
-        // During development, allow all authenticated users to read/write messages
-        allow read, write: if isSignedIn();
+        // During development, allow all authenticated users to read messages
+        allow read: if isSignedIn() && 
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.hasAny([request.auth.uid]);
+        
+        // Allow creating messages if user is a chat participant
+        allow create: if isSignedIn() && 
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.hasAny([request.auth.uid]) &&
+          request.resource.data.senderId == request.auth.uid;
+        
+        // Allow updating messages (for reactions, etc.)
+        allow update: if isSignedIn() && 
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds.hasAny([request.auth.uid]);
       }
       
       match /events/{eventId} {
@@ -105,6 +117,34 @@ service cloud.firestore {
       // Allow updating the likes count on the video document
       allow update: if isSignedIn() && 
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments']);
+    }
+    
+    // Add rules for likes collection
+    match /likes/{likeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+    
+    // Add rules for passes collection
+    match /passes/{passId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+        request.resource.data.passerId == request.auth.uid;
+      allow delete: if isSignedIn() && 
+        resource.data.passerId == request.auth.uid;
+    }
+    
+    // Add rules for matches collection
+    match /matches/{matchId} {
+      allow read: if isSignedIn() && 
+        request.auth.uid in resource.data.users;
+      allow create: if isSignedIn() && 
+        request.auth.uid in request.resource.data.users;
+      allow update: if isSignedIn() && 
+        request.auth.uid in resource.data.users;
+      allow delete: if isSignedIn() && 
+        request.auth.uid in resource.data.users;
     }
     
     // Deny access to all other collections by default

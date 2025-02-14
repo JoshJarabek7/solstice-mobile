@@ -10,6 +10,7 @@ struct DatingView: View {
   @State private var errorMessage = ""
   @State private var isLoading = true
   @State private var currentFilters: DatingFilters
+  @State private var navigationPath = NavigationPath()
   @Environment(\.locationManager) private var locationManager
   @Environment(UserViewModel.self) private var userViewModel
 
@@ -19,16 +20,25 @@ struct DatingView: View {
   }
 
   var body: some View {
-    NavigationStack {
+    NavigationStack(path: $navigationPath) {
       ZStack {
         if isLoading {
           DatingLoadingView()
         } else if viewModel.profiles.isEmpty {
           EmptyStateView(showFilters: $showFilters)
+            .transition(.opacity)
         } else {
-          ProfileCardsStack(viewModel: viewModel)
+          ProfileStackView(
+            viewModel: viewModel,
+            onError: { error in
+              showError = true
+              errorMessage = error.localizedDescription
+            }
+          )
+          .transition(.opacity)
         }
       }
+      .animation(.easeInOut, value: viewModel.profiles.isEmpty)
       .navigationTitle("Dating")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -53,6 +63,31 @@ struct DatingView: View {
         Button("OK") {}
       } message: {
         Text(errorMessage)
+      }
+      .alert("It's a Match! 🎉", isPresented: $viewModel.showMatchAlert) {
+        Button("Start Chatting") {
+          if let chatId = viewModel.matchedChatId {
+            // Navigate to the chat view
+            navigationPath.append(Route.chat(chatId))
+          }
+        }
+        Button("Keep Swiping", role: .cancel) {
+          // Clear the matched user and chat ID
+          viewModel.matchedUser = nil
+          viewModel.matchedChatId = nil
+        }
+      } message: {
+        if let matchedUser = viewModel.matchedUser {
+          Text("You and \(matchedUser.fullName) liked each other! Start chatting now to get to know each other better.")
+        }
+      }
+      .navigationDestination(for: Route.self) { route in
+        switch route {
+        case .chat(let chatId):
+          if let chat = MessagesViewModel.shared.chats.first(where: { $0.id == chatId }) {
+            ChatView(chat: chat)
+          }
+        }
       }
       .task {
         do {
@@ -81,6 +116,77 @@ struct DatingView: View {
       }
       .onAppear {
         viewModel.setReturningFromProfile(true)
+      }
+    }
+  }
+}
+
+enum Route: Hashable {
+  case chat(String)
+}
+
+// MARK: - Profile Stack View
+private struct ProfileStackView: View {
+  let viewModel: DatingViewModel
+  let onError: (Error) -> Void
+  
+  var body: some View {
+    ProfileCardsView(
+      profiles: viewModel.profiles,
+      onLike: { profile, index in handleLike(profile: profile, at: index) },
+      onPass: { profile, index in handlePass(profile: profile, at: index) }
+    )
+  }
+  
+  private func handleLike(profile: User, at index: Int) {
+    Task {
+      await viewModel.likeProfile(profile)
+      await viewModel.removeProfile(at: index)
+      
+      // Fetch more profiles if running low
+      if viewModel.profiles.count < 3 {
+        do {
+          try await viewModel.refreshProfiles()
+        } catch {
+          onError(error)
+        }
+      }
+    }
+  }
+  
+  private func handlePass(profile: User, at index: Int) {
+    Task {
+      await viewModel.passProfile(profile)
+      await viewModel.removeProfile(at: index)
+      
+      // Fetch more profiles if running low
+      if viewModel.profiles.count < 3 {
+        do {
+          try await viewModel.refreshProfiles()
+        } catch {
+          onError(error)
+        }
+      }
+    }
+  }
+}
+
+// MARK: - Profile Cards View
+private struct ProfileCardsView: View {
+  let profiles: [User]
+  let onLike: (User, Int) -> Void
+  let onPass: (User, Int) -> Void
+  
+  var body: some View {
+    ZStack {
+      ForEach(Array(profiles.enumerated().reversed()), id: \.element.id) { index, profile in
+        DatingCardView(
+          profile: profile,
+          onLike: { onLike(profile, index) },
+          onPass: { onPass(profile, index) }
+        )
+        .id("\(profile.id ?? "")-\(index)")
+        .zIndex(Double(profiles.count - index))
       }
     }
   }
@@ -123,35 +229,7 @@ private struct EmptyStateView: View {
   }
 }
 
-private struct ProfileCardsStack: View {
-  let viewModel: DatingViewModel
-  
-  var body: some View {
-    ZStack {
-      ForEach(Array(viewModel.profiles.enumerated().reversed()), id: \.element.id) { index, profile in
-        DatingCardView(
-          profile: profile,
-          onLike: {
-            Task {
-              await viewModel.likeProfile(profile)
-              await viewModel.removeProfile(at: index)
-            }
-          },
-          onPass: {
-            Task {
-              await viewModel.passProfile(profile)
-              await viewModel.removeProfile(at: index)
-            }
-          }
-        )
-        .id("\(profile.id ?? "")-\(index)")  // Unique identifier combining id and index
-        .zIndex(Double(viewModel.profiles.count - index))  // Ensure proper stacking
-      }
-    }
-  }
-}
-
-struct DatingCardView: View {
+private struct DatingCardView: View {
   private enum SwipeDirection {
     case none, vertical, horizontal
   }
@@ -215,21 +293,6 @@ struct DatingCardView: View {
             }
             .tag(index)
             .clipped()
-            .gesture(
-              DragGesture()
-                .onEnded { value in
-                  let threshold: CGFloat = 50
-                  if value.translation.width > threshold && currentImageIndex > 0 {
-                    withAnimation {
-                      currentImageIndex -= 1
-                    }
-                  } else if value.translation.width < -threshold && currentImageIndex < profile.datingImages.count - 1 {
-                    withAnimation {
-                      currentImageIndex += 1
-                    }
-                  }
-                }
-            )
           }
         }
         .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
@@ -324,26 +387,18 @@ struct DatingCardView: View {
           isDragging = true
           let translation = gesture.translation
           
-          // Determine primary direction of swipe
-          if swipeDirection == .none {
-            if abs(translation.height) > abs(translation.width) {
-              swipeDirection = .vertical
-            } else {
-              swipeDirection = .horizontal
-            }
-          }
+          // Only handle vertical swipes for like/pass
+          let verticalComponent = abs(translation.height)
+          let horizontalComponent = abs(translation.width)
           
-          // Apply translation based on direction
-          switch swipeDirection {
-          case .vertical:
+          // If the movement is more vertical than horizontal, handle the swipe
+          if verticalComponent > horizontalComponent {
             offset = CGSize(width: translation.width * 0.3, height: translation.height)
-          case .horizontal:
-            // Only allow horizontal swipes for image navigation
-            if currentImageIndex > 0 || currentImageIndex < profile.datingImages.count - 1 {
-              // Don't set offset, let TabView handle it
-            }
-          case .none:
-            break
+            swipeDirection = .vertical
+          } else {
+            // Let TabView handle horizontal swipes
+            offset = .zero
+            swipeDirection = .horizontal
           }
         }
         .onEnded { gesture in
@@ -351,10 +406,10 @@ struct DatingCardView: View {
           let translation = gesture.translation
           let velocity = gesture.velocity
           
-          switch swipeDirection {
-          case .vertical:
-            let threshold: CGFloat = 100
-            let velocityThreshold: CGFloat = 500
+          // Only process vertical swipes
+          if abs(translation.height) > abs(translation.width) {
+            let threshold: CGFloat = UIScreen.main.bounds.height * 0.25  // About 25% of screen height
+            let velocityThreshold: CGFloat = 300
             let isSwiftSwipe = abs(velocity.height) > velocityThreshold
             
             // Only trigger if we're beyond threshold and moving away from center
@@ -381,49 +436,24 @@ struct DatingCardView: View {
                 }
               }
             } else {
-              // Reset position
-              withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+              // Reset position with a smoother spring animation
+              withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 offset = .zero
               }
             }
-            
-          case .horizontal:
-            let threshold: CGFloat = 50
-            if abs(translation.width) > threshold {
-              if translation.width > threshold && currentImageIndex > 0 {
-                withAnimation {
-                  currentImageIndex -= 1
-                }
-              } else if translation.width < -threshold && currentImageIndex < profile.datingImages.count - 1 {
-                withAnimation {
-                  currentImageIndex += 1
-                }
-              }
-            }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-              offset = .zero
-            }
-            
-          case .none:
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+          } else {
+            // Reset any offset if it was a horizontal swipe
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
               offset = .zero
             }
           }
           
-          // Always reset the swipe direction when the gesture ends
+          // Reset swipe direction after animation
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             swipeDirection = .none
           }
         }
     )
-    .alert("It's a Match! 🎉", isPresented: $showMatchAlert) {
-      Button("Start Chatting", role: .none) {
-        // Navigate to chat
-      }
-      Button("Keep Swiping", role: .cancel) {}
-    } message: {
-      Text("You and \(profile.fullName) liked each other!")
-    }
   }
 }
 

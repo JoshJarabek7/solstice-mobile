@@ -6,18 +6,13 @@ struct ContentView: View {
   @StateObject private var authViewModel = AuthViewModel()
   @State private var userViewModel: UserViewModel?
 
-  // Store MessagesViewModel using @State, because @Observable ≠ ObservableObject.
-  // This ensures the same instance persists while ContentView lives.
-  @State private var messagesViewModel = MessagesViewModel()
-
   var body: some View {
     Group {
       if authViewModel.userSession == nil {
         AuthView()
           .environmentObject(authViewModel)
       } else {
-        // Pass messagesViewModel into MainTabView so it can be shared by the entire app.
-        MainTabView(messagesViewModel: messagesViewModel)
+        MainTabView()
           .environmentObject(authViewModel)
           .environment(userViewModel ?? UserViewModel())
       }
@@ -28,10 +23,6 @@ struct ContentView: View {
 struct MainTabView: View {
   @EnvironmentObject var authViewModel: AuthViewModel
   @Environment(UserViewModel.self) var userViewModel
-
-  // We accept the existing MessagesViewModel from ContentView,
-  // so SwiftUI always uses the same instance (i.e. no “Build Failed”).
-  let messagesViewModel: MessagesViewModel
 
   @State private var selectedTab = 0
 
@@ -64,9 +55,8 @@ struct MainTabView: View {
       }
       .tag(2)
 
-      // Reuse the same MessagesViewModel instance here:
       NavigationStack {
-        MessagesView(viewModel: messagesViewModel)
+        MessagesView(viewModel: MessagesViewModel.shared)
       }
       .tabItem {
         Image(systemName: "message")

@@ -12,11 +12,13 @@ extension Date {
 enum MessageTab {
   case regular
   case groups
+  case dating
 
   var title: String {
     switch self {
     case .regular: return "Messages"
     case .groups: return "Groups"
+    case .dating: return "Dating"
     }
   }
 }
@@ -55,6 +57,8 @@ struct MessagesView: View {
       chats = viewModel.regularChats
     case .groups:
       chats = viewModel.groupChats
+    case .dating:
+      chats = viewModel.datingChats
     }
 
     if searchText.isEmpty {
@@ -153,6 +157,7 @@ private struct MessagesContentView: View {
       Picker("Message Type", selection: $selectedTab) {
         Text("Messages").tag(MessageTab.regular)
         Text("Groups").tag(MessageTab.groups)
+        Text("Dating").tag(MessageTab.dating)
       }
       .pickerStyle(.segmented)
       .padding()
