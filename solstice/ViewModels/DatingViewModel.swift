@@ -53,14 +53,15 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
             let data = change.document.data()
             guard let likerId = data["likerId"] as? String else { continue }
             
-            // Skip if we've already shown this match
-            if self.shownMatchIds.contains(likerId) {
-              continue
-            }
-            
-            // Check if we've also liked them
+            // Check if we've already shown this match
             Task {
               do {
+                let isShown = try await self.isMatchShown(currentUserId: currentUserId, otherUserId: likerId)
+                if isShown {
+                  return
+                }
+                
+                // Check if we've also liked them
                 let ourLikeDoc = try await self.database.collection("likes")
                   .document("\(currentUserId)_\(likerId)")
                   .getDocument()
@@ -81,12 +82,13 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
                   }
                   
                   await MainActor.run {
-                    // Add to shown matches before showing alert
-                    self.shownMatchIds.insert(likerId)
                     self.matchedUser = matchedUser
                     self.matchedChatId = matchChat?.documentID
                     self.showMatchAlert = true
                   }
+                  
+                  // Mark the match as shown
+                  try await self.markMatchAsShown(currentUserId: currentUserId, otherUserId: likerId)
                 }
               } catch {
                 print("[ERROR] Error checking for match: \(error)")
@@ -95,6 +97,40 @@ final class DatingViewModel: NSObject, CLLocationManagerDelegate, @unchecked Sen
           }
         }
       }
+  }
+
+  private func isMatchShown(currentUserId: String, otherUserId: String) async throws -> Bool {
+    let matchId = [currentUserId, otherUserId].sorted().joined(separator: "_")
+    let doc = try await database.collection("shownMatches").document(matchId).getDocument()
+    if doc.exists {
+      let data = doc.data()
+      let shownToUsers = data?["shownToUsers"] as? [String] ?? []
+      return shownToUsers.contains(currentUserId)
+    }
+    return false
+  }
+
+  private func markMatchAsShown(currentUserId: String, otherUserId: String) async throws {
+    let matchId = [currentUserId, otherUserId].sorted().joined(separator: "_")
+    let docRef = database.collection("shownMatches").document(matchId)
+    
+    // Get the current document
+    let doc = try await docRef.getDocument()
+    if doc.exists {
+      // Update existing document
+      try await docRef.updateData([
+        "shownToUsers": FieldValue.arrayUnion([currentUserId]),
+        "lastUpdated": FieldValue.serverTimestamp()
+      ])
+    } else {
+      // Create new document
+      try await docRef.setData([
+        "users": [currentUserId, otherUserId],
+        "shownToUsers": [currentUserId],
+        "createdAt": FieldValue.serverTimestamp(),
+        "lastUpdated": FieldValue.serverTimestamp()
+      ])
+    }
   }
 
   private func fetchUser(userId: String) async throws -> User {
