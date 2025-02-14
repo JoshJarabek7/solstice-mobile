@@ -1,8 +1,4 @@
 /// DatingSettingsView.swift
-/// This version attempts to ensure that each photo is independently draggable
-/// and that tapping anywhere else won't initiate a drag or delete photos unexpectedly.
-/// The photo itself is the drag source; the remove button is separate and won't interfere
-/// with dragging. No other tap gestures are present.
 
 import FirebaseAuth
 import FirebaseFirestore
@@ -143,117 +139,130 @@ struct DatingSettingsView: View {
   // MARK: - Photos Section
 
   private var photosSection: some View {
-    LazyVGrid(columns: [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible())
-    ], spacing: 8) {
-        ForEach(Array(userViewModel.user.datingImages.enumerated()), id: \.offset) { index, photoURL in
-            AsyncImage(url: URL(string: photoURL)) { phase in
-                if let image = phase.image {
-                    Button {
-                        selectedPhotoIndex = index
-                        showPhotoOptions = true
-                    } label: {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(minWidth: 0, maxWidth: .infinity)
-                            .aspectRatio(3/4, contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(selectedPhotoIndex == index ? Color.blue : Color.gray.opacity(0.3), lineWidth: selectedPhotoIndex == index ? 2 : 1)
-                            )
-                            .overlay(alignment: .topTrailing) {
-                                Image(systemName: "ellipsis.circle.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundStyle(.white, Color.black.opacity(0.5))
-                                    .padding(8)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .confirmationDialog("Photo Options", isPresented: $showPhotoOptions, presenting: selectedPhotoIndex) { index in
-                        if index > 0 {
-                            Button("Move Left") {
-                                movePhoto(from: index, to: index - 1)
-                            }
-                        }
-                        
-                        if index < userViewModel.user.datingImages.count - 1 {
-                            Button("Move Right") {
-                                movePhoto(from: index, to: index + 1)
-                            }
-                        }
-                        
-                        Button("Delete", role: .destructive) {
-                            deletePhoto(at: index)
-                            selectedPhotoIndex = nil
-                        }
-                        
-                        Button("Cancel", role: .cancel) {
-                            selectedPhotoIndex = nil
-                        }
-                    } message: { _ in
-                        Text("What would you like to do with this photo?")
-                    }
-                } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .aspectRatio(3/4, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay {
-                            if phase.error != nil {
-                                Image(systemName: "exclamationmark.triangle")
-                                    .foregroundColor(.gray)
-                            } else {
-                                ProgressView()
-                            }
-                        }
-                }
-            }
-        }
+    ScrollView {
+        let columns = [
+            GridItem(.flexible()),
+            GridItem(.flexible())
+        ]
         
-        if userViewModel.user.datingImages.count < 5 {
-            PhotosPicker(
-                selection: $selectedPhotos,
-                maxSelectionCount: 5 - userViewModel.user.datingImages.count,
-                matching: .images
-            ) {
-                VStack {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(.blue)
-                    Text("Add Photo")
-                        .font(.callout)
-                        .foregroundColor(.blue)
-                }
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .aspectRatio(3/4, contentMode: .fit)
-                .background(Color.gray.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .onChange(of: selectedPhotos) { _, newItems in
-                Task {
-                    for item in newItems {
-                        if let data = try? await item.loadTransferable(type: Data.self),
-                           !data.isEmpty {
-                            do {
-                                let url = try await userViewModel.uploadDatingPhoto(imageData: data)
-                                userViewModel.user.datingImages.append(url)
-                                try await userViewModel.updateUser()
-                            } catch {
-                                print("Error uploading new photo: \(error)")
-                                showError("Could not upload photo. Please try again.")
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(Array(userViewModel.user.datingImages.enumerated()), id: \.offset) { index, photoURL in
+                GeometryReader { geometry in
+                    AsyncImage(url: URL(string: photoURL)) { phase in
+                        if let image = phase.image {
+                            Button {
+                                selectedPhotoIndex = index
+                                showPhotoOptions = true
+                            } label: {
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: geometry.size.width, height: geometry.size.width * 1.3)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(selectedPhotoIndex == index ? Color.blue : Color.gray.opacity(0.3), lineWidth: selectedPhotoIndex == index ? 2 : 1)
+                                    )
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .id("photo_\(photoURL)")
+                            .transition(.opacity.combined(with: .scale))
+                            .animation(.spring(duration: 0.3), value: index)
+                            .confirmationDialog("Photo Options", isPresented: $showPhotoOptions, presenting: selectedPhotoIndex) { index in
+                                if index > 0 {
+                                    Button("Move Left") {
+                                        movePhoto(from: index, to: index - 1)
+                                    }
+                                }
+                                
+                                if index < userViewModel.user.datingImages.count - 1 {
+                                    Button("Move Right") {
+                                        movePhoto(from: index, to: index + 1)
+                                    }
+                                }
+                                
+                                Button("Delete", role: .destructive) {
+                                    deletePhoto(at: index)
+                                    selectedPhotoIndex = nil
+                                }
+                                
+                                Button("Cancel", role: .cancel) {
+                                    selectedPhotoIndex = nil
+                                }
+                            } message: { _ in
+                                Text("What would you like to do with this photo?")
+                            }
+                        } else {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: geometry.size.width, height: geometry.size.width * 1.3)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay {
+                                    if phase.error != nil {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .foregroundColor(.gray)
+                                    } else {
+                                        ProgressView()
+                                    }
+                                }
                         }
                     }
-                    selectedPhotos.removeAll()
+                }
+                .aspectRatio(1/1.3, contentMode: .fit)
+            }
+            
+            if userViewModel.user.datingImages.count < 5 {
+                GeometryReader { geometry in
+                    PhotosPicker(
+                        selection: $selectedPhotos,
+                        maxSelectionCount: 5 - userViewModel.user.datingImages.count,
+                        matching: .images
+                    ) {
+                        VStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.blue)
+                            Text("Add Photo")
+                                .font(.callout)
+                                .foregroundColor(.blue)
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.width * 1.3)
+                        .background(Color.gray.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                }
+                .aspectRatio(1/1.3, contentMode: .fit)
+                .transition(.opacity.combined(with: .scale))
+                .onChange(of: selectedPhotos) { _, newItems in
+                    Task {
+                        for item in newItems {
+                            if let data = try? await item.loadTransferable(type: Data.self),
+                               !data.isEmpty {
+                                do {
+                                    let url = try await userViewModel.uploadDatingPhoto(imageData: data)
+                                    withAnimation(.spring(duration: 0.3)) {
+                                        userViewModel.user.datingImages.append(url)
+                                    }
+                                    try await userViewModel.updateUser()
+                                } catch {
+                                    print("Error uploading new photo: \(error)")
+                                    showError("Could not upload photo. Please try again.")
+                                }
+                            }
+                        }
+                        selectedPhotos.removeAll()
+                    }
                 }
             }
         }
+        .padding(.horizontal, 12)
     }
-    .padding(.horizontal, 8)
   }
   
   // MARK: - Helper Functions
@@ -267,16 +276,21 @@ struct DatingSettingsView: View {
     let oldImages = userViewModel.user.datingImages
     var updated = oldImages
     let movedItem = updated.remove(at: from)
-    updated.insert(movedItem, at: to)
-    userViewModel.user.datingImages = updated
-    selectedPhotoIndex = to // Update selection to follow the moved photo
+    
+    withAnimation(.spring(duration: 0.3)) {
+        updated.insert(movedItem, at: to)
+        userViewModel.user.datingImages = updated
+        selectedPhotoIndex = to // Update selection to follow the moved photo
+    }
     
     Task {
       do {
         try await userViewModel.updateUser()
       } catch {
-        userViewModel.user.datingImages = oldImages
-        selectedPhotoIndex = from // Restore selection on error
+        withAnimation(.spring(duration: 0.3)) {
+            userViewModel.user.datingImages = oldImages
+            selectedPhotoIndex = from // Restore selection on error
+        }
         print("Error moving photo: \(error)")
       }
     }
@@ -286,14 +300,19 @@ struct DatingSettingsView: View {
     guard index < userViewModel.user.datingImages.count else { return }
     let oldImages = userViewModel.user.datingImages
     var updated = oldImages
-    updated.remove(at: index)
-    userViewModel.user.datingImages = updated
+    
+    withAnimation(.spring(duration: 0.3)) {
+        updated.remove(at: index)
+        userViewModel.user.datingImages = updated
+    }
     
     Task {
       do {
         try await userViewModel.updateUser()
       } catch {
-        userViewModel.user.datingImages = oldImages
+        withAnimation(.spring(duration: 0.3)) {
+            userViewModel.user.datingImages = oldImages
+        }
         print("Error deleting photo: \(error)")
       }
     }

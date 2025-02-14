@@ -353,8 +353,9 @@ struct DatingProfileSection: View {
   @State private var selectedPhotoIndex = 0
   @State private var isLiked: Bool?
   @State private var isLoading = false
+  @State private var currentUser: User?
   @Environment(UserViewModel.self) private var userViewModel
-
+  
   private var canInteract: Bool {
     guard let currentUser = Auth.auth().currentUser else { return false }
     return currentUser.uid != user.id  // Not own profile
@@ -367,12 +368,13 @@ struct DatingProfileSection: View {
       // Dating Images
       ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: 12) {
-          ForEach(user.datingImages.indices, id: \.self) { index in
+          ForEach((currentUser?.datingImages ?? user.datingImages).indices, id: \.self) { index in
+            let images = currentUser?.datingImages ?? user.datingImages
             Button {
               selectedPhotoIndex = index
               showPhotoViewer = true
             } label: {
-              AsyncImage(url: URL(string: user.datingImages[index])) { image in
+              AsyncImage(url: URL(string: images[index])) { image in
                 image
                   .resizable()
                   .scaledToFill()
@@ -389,14 +391,14 @@ struct DatingProfileSection: View {
       }
       .fullScreenCover(isPresented: $showPhotoViewer) {
         PhotoCarouselViewer(
-          images: user.datingImages,
+          images: currentUser?.datingImages ?? user.datingImages,
           initialIndex: selectedPhotoIndex,
           isPresented: $showPhotoViewer
         )
       }
       // Force view recreation when index changes
       .id("photoViewer_\(selectedPhotoIndex)")
-
+      
       // Like/Dislike Buttons
       if canInteract {
         HStack(spacing: 20) {
@@ -477,9 +479,33 @@ struct DatingProfileSection: View {
     .padding(.vertical)
     .task {
       await checkLikeStatus()
+      if user.id != nil {
+        listenToUserUpdates()
+      }
     }
   }
-
+  
+  private func listenToUserUpdates() {
+    guard let userId = user.id else { return }
+    
+    // Set up real-time listener for user document
+    let db = Firestore.firestore()
+    db.collection("users").document(userId)
+      .addSnapshotListener { documentSnapshot, error in
+        guard let document = documentSnapshot else {
+          print("Error fetching user: \(error?.localizedDescription ?? "Unknown error")")
+          return
+        }
+        
+        do {
+          let updatedUser = try document.data(as: User.self)
+          currentUser = updatedUser
+        } catch {
+          print("Error decoding user: \(error)")
+        }
+      }
+  }
+  
   private func checkLikeStatus() async {
     guard canInteract, let userId = user.id else { return }
 
