@@ -1,325 +1,358 @@
+/// DatingSettingsView.swift
+/// This version attempts to ensure that each photo is independently draggable
+/// and that tapping anywhere else won't initiate a drag or delete photos unexpectedly.
+/// The photo itself is the drag source; the remove button is separate and won't interfere
+/// with dragging. No other tap gestures are present.
+
 import FirebaseAuth
 import FirebaseFirestore
 import PhotosUI
 import SwiftUI
 
+extension UTType {
+  static let photoIndex = UTType(exportedAs: "com.solstice.photoindex")
+}
+
+/// Transferable object for drag-and-drop reordering of photos.
+struct DragPhotoItem: Transferable, Codable {
+  let index: Int
+  let url: String
+  
+  static var transferRepresentation: some TransferRepresentation {
+    CodableRepresentation(contentType: .photoIndex)
+  }
+}
+
 struct DatingSettingsView: View {
-  @Environment(UserViewModel.self) private var viewModel
+  @Environment(\.dismiss) private var dismiss
+  @Environment(UserViewModel.self) private var userViewModel
+  let userId: String
+  
   @State private var showDeactivateConfirmation = false
   @State private var selectedPhotos: [PhotosPickerItem] = []
-  @State private var showBirthdayPicker = false
-  @State private var selectedDate = Date()
-  @State private var showError = false
-  @State private var errorMessage = ""
-
+  @State private var showAlert = false
+  @State private var alertType: DatingAlertType = .error("")
+  @State private var isSaving = false
+  @State private var selectedPhotoIndex: Int? = nil
+  @State private var showPhotoOptions = false
+  
+  private enum DatingAlertType {
+    case error(String)
+    case deactivateConfirmation
+    
+    var title: String {
+      switch self {
+      case .error:
+        return "Error"
+      case .deactivateConfirmation:
+        return "Deactivate Dating?"
+      }
+    }
+    
+    var message: String {
+      switch self {
+      case .error(let message):
+        return message
+      case .deactivateConfirmation:
+        return "This will hide your dating profile and delete all your dating matches. This action cannot be undone."
+      }
+    }
+  }
+  
   var body: some View {
-    List {
-      enableDatingToggleSection
-
-      if viewModel.user.isDatingEnabled {
-        basicInformationSection
-        datingPhotosSection
+    Form {
+      // Dating Active toggle
+      Section("Dating Profile") {
+        Toggle("Dating Active", isOn: Binding(
+          get: { userViewModel.user.isDatingEnabled },
+          set: { newValue in
+            if !newValue {
+              alertType = .deactivateConfirmation
+              showAlert = true
+            } else {
+              updateDatingStatus(true)
+            }
+          }
+        ))
+      }
+      
+      // Only show these sections if user is dating-enabled
+      if userViewModel.user.isDatingEnabled {
+        Section("Photos") {
+          photosSection
+        }
+        
+        Section("Basic Information") {
+          Picker("Gender", selection: Binding(
+            get: { userViewModel.user.gender },
+            set: { newValue in
+              updateUserField(\.gender, newValue)
+            }
+          )) {
+            ForEach(User.Gender.allCases) { gender in
+              Text(gender.rawValue.capitalized).tag(gender)
+            }
+          }
+          
+          TextField(
+            "Bio",
+            text: Binding(
+              get: { userViewModel.user.bio ?? "" },
+              set: { newValue in
+                let oldValue = userViewModel.user.bio
+                userViewModel.user.bio = newValue.isEmpty ? nil : newValue
+                Task {
+                  do {
+                    try await userViewModel.updateUser()
+                  } catch {
+                    print("Error updating bio: \(error)")
+                    userViewModel.user.bio = oldValue
+                  }
+                }
+              }
+            ),
+            axis: .vertical
+          )
+          .lineLimit(3...6)
+          .textFieldStyle(.roundedBorder)
+        }
       }
     }
     .navigationTitle("Dating Profile")
-    .onChange(of: selectedPhotos) { oldValue, newValue in
-      handlePhotoSelection(newValue)
-    }
-    .alert("Deactivate Dating?", isPresented: $showDeactivateConfirmation) {
-      Button("Cancel", role: .cancel) {
-        viewModel.user.isDatingEnabled = true
-      }
-
-      Button("Deactivate", role: .destructive) {
-        Task {
-          await viewModel.deactivateDating()
-        }
-      }
-    } message: {
-      Text(
-        "This will hide your dating profile and delete all your dating matches. This action cannot be undone."
-      )
-    }
-    .alert("Error", isPresented: $showError) {
-      Button("OK", role: .cancel) {}
-    } message: {
-      Text(errorMessage)
-    }
-    .sheet(isPresented: $showBirthdayPicker) {
-      NavigationStack {
-        birthdayPickerView
-      }
-      .presentationDetents([.medium])
-    }
-  }
-
-  private var enableDatingToggleSection: some View {
-    Section {
-      Toggle("Dating Active", isOn: Binding(
-        get: { viewModel.user.isDatingEnabled },
-        set: { newValue in
-          viewModel.user.isDatingEnabled = newValue
-          if newValue {
-            // Check if birthday is set
-            if viewModel.user.birthday == nil {
-              // Show birthday picker
-              showBirthdayPicker = true
-              // Revert toggle until birthday is set
-              viewModel.user.isDatingEnabled = false
-            }
-          } else {
-            showDeactivateConfirmation = true
-          }
-        }
-      ))
-    } footer: {
-      if viewModel.user.birthday == nil {
-        Text("You must set your birthday to enable dating.")
-      } else {
-        Text(
-          "When dating is deactivated, your profile will be hidden from other users and all your dating matches will be deleted."
-        )
-      }
-    }
-  }
-
-  private var birthdayPickerView: some View {
-    VStack {
-      DatePicker(
-        "Birthday",
-        selection: $selectedDate,
-        in: ...Calendar.current.date(byAdding: .year, value: -18, to: Date())!,
-        displayedComponents: .date
-      )
-      .datePickerStyle(.wheel)
-      .padding()
-
-      Button("Set Birthday") {
-        Task {
-          do {
-            viewModel.user.birthday = selectedDate
-            try await viewModel.updateUser()
-            showBirthdayPicker = false
-            // Now enable dating
-            viewModel.user.isDatingEnabled = true
-            try await viewModel.updateUser()
-          } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-          }
-        }
-      }
-      .buttonStyle(.borderedProminent)
-      .padding()
-    }
-    .navigationTitle("Set Birthday")
     .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .navigationBarLeading) {
-        Button("Cancel") {
-          showBirthdayPicker = false
+    .alert(alertType.title, isPresented: $showAlert) {
+      switch alertType {
+      case .error:
+        Button("OK", role: .cancel) {}
+      case .deactivateConfirmation:
+        Button("Cancel", role: .cancel) {
+          // Revert toggle if user cancels
+          userViewModel.user.isDatingEnabled = true
         }
-      }
-    }
-  }
-
-  private var basicInformationSection: some View {
-    Section("Basic Information") {
-      if let birthday = viewModel.user.birthday {
-        HStack {
-          Label("Birthday", systemImage: "calendar")
-          Spacer()
-          Text(birthday, style: .date)
-            .foregroundColor(.gray)
-        }
-      }
-      
-      Picker("Gender", selection: Binding(
-        get: { viewModel.user.gender },
-        set: { newValue in
-          let oldValue = viewModel.user.gender
-          viewModel.user.gender = newValue
+        Button("Deactivate", role: .destructive) {
           Task {
-            do {
-              try await viewModel.updateUser()
-            } catch {
-              print("Error updating gender: \(error)")
-              viewModel.user.gender = oldValue
+            await deactivateDating()
+          }
+        }
+      }
+    } message: {
+      Text(alertType.message)
+    }
+  }
+  
+  // MARK: - Photos Section
+
+  private var photosSection: some View {
+    LazyVGrid(columns: [
+        GridItem(.flexible()),
+        GridItem(.flexible()),
+        GridItem(.flexible())
+    ], spacing: 8) {
+        ForEach(Array(userViewModel.user.datingImages.enumerated()), id: \.offset) { index, photoURL in
+            AsyncImage(url: URL(string: photoURL)) { phase in
+                if let image = phase.image {
+                    Button {
+                        selectedPhotoIndex = index
+                        showPhotoOptions = true
+                    } label: {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(minWidth: 0, maxWidth: .infinity)
+                            .aspectRatio(3/4, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(selectedPhotoIndex == index ? Color.blue : Color.gray.opacity(0.3), lineWidth: selectedPhotoIndex == index ? 2 : 1)
+                            )
+                            .overlay(alignment: .topTrailing) {
+                                Image(systemName: "ellipsis.circle.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundStyle(.white, Color.black.opacity(0.5))
+                                    .padding(8)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog("Photo Options", isPresented: $showPhotoOptions, presenting: selectedPhotoIndex) { index in
+                        if index > 0 {
+                            Button("Move Left") {
+                                movePhoto(from: index, to: index - 1)
+                            }
+                        }
+                        
+                        if index < userViewModel.user.datingImages.count - 1 {
+                            Button("Move Right") {
+                                movePhoto(from: index, to: index + 1)
+                            }
+                        }
+                        
+                        Button("Delete", role: .destructive) {
+                            deletePhoto(at: index)
+                            selectedPhotoIndex = nil
+                        }
+                        
+                        Button("Cancel", role: .cancel) {
+                            selectedPhotoIndex = nil
+                        }
+                    } message: { _ in
+                        Text("What would you like to do with this photo?")
+                    }
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .aspectRatio(3/4, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            if phase.error != nil {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.gray)
+                            } else {
+                                ProgressView()
+                            }
+                        }
+                }
             }
-          }
         }
-      )) {
-        ForEach(User.Gender.allCases, id: \.self) { gender in
-          Text(gender.rawValue.capitalized).tag(gender)
-        }
-      }
-      
-      TextField(
-        "Bio",
-        text: Binding(
-          get: { viewModel.user.bio ?? "" },
-          set: { newValue in
-            let oldValue = viewModel.user.bio
-            viewModel.user.bio = newValue.isEmpty ? nil : newValue
-            Task {
-              do {
-                try await viewModel.updateUser()
-              } catch {
-                print("Error updating bio: \(error)")
-                viewModel.user.bio = oldValue
-              }
+        
+        if userViewModel.user.datingImages.count < 5 {
+            PhotosPicker(
+                selection: $selectedPhotos,
+                maxSelectionCount: 5 - userViewModel.user.datingImages.count,
+                matching: .images
+            ) {
+                VStack {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.blue)
+                    Text("Add Photo")
+                        .font(.callout)
+                        .foregroundColor(.blue)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .aspectRatio(3/4, contentMode: .fit)
+                .background(Color.gray.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-          }
-        )
-      )
-      .textFieldStyle(.roundedBorder)
-    }
-  }
-
-  private var datingPhotosSection: some View {
-    Section("Dating Photos") {
-      ScrollView(.horizontal) {
-        HStack {
-          ForEach(viewModel.user.datingImages, id: \.self) { photoURL in
-            datingPhotoView(for: photoURL)
-          }
-          addPhotoButton
+            .onChange(of: selectedPhotos) { _, newItems in
+                Task {
+                    for item in newItems {
+                        if let data = try? await item.loadTransferable(type: Data.self),
+                           !data.isEmpty {
+                            do {
+                                let url = try await userViewModel.uploadDatingPhoto(imageData: data)
+                                userViewModel.user.datingImages.append(url)
+                                try await userViewModel.updateUser()
+                            } catch {
+                                print("Error uploading new photo: \(error)")
+                                showError("Could not upload photo. Please try again.")
+                            }
+                        }
+                    }
+                    selectedPhotos.removeAll()
+                }
+            }
         }
-        .padding(.vertical)
-      }
     }
+    .padding(.horizontal, 8)
   }
+  
+  // MARK: - Helper Functions
 
-  private func datingPhotoView(for photoURL: String) -> some View {
-    AsyncImage(url: URL(string: photoURL)) { image in
-      image
-        .resizable()
-        .scaledToFill()
-    } placeholder: {
-      ProgressView()
-    }
-    .frame(width: 100, height: 100)
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay(alignment: .topTrailing) {
-      deletePhotoButton(for: photoURL)
-    }
-  }
-
-  private func deletePhotoButton(for photoURL: String) -> some View {
-    Button {
-      if let index = viewModel.user.datingImages.firstIndex(of: photoURL) {
-        let oldPhotos = viewModel.user.datingImages
-        viewModel.user.datingImages.remove(at: index)
-        Task {
-          do {
-            try await viewModel.updateUser()
-          } catch {
-            print("Error deleting photo: \(error)")
-            viewModel.user.datingImages = oldPhotos
-          }
-        }
-      }
-    } label: {
-      Image(systemName: "xmark.circle.fill")
-        .foregroundStyle(.white, .black)
-        .background(Circle().fill(.white))
-    }
-    .padding(4)
-  }
-
-  private var addPhotoButton: some View {
-    Group {
-      if viewModel.user.datingImages.count < 5 {
-        PhotosPicker(
-          selection: $selectedPhotos,
-          maxSelectionCount: 5 - viewModel.user.datingImages.count,
-          matching: .images
-        ) {
-          Image(systemName: "plus.circle.fill")
-            .font(.system(size: 30))
-            .foregroundColor(.blue)
-            .frame(width: 100, height: 100)
-            .background(Color.gray.opacity(0.2))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-      }
-    }
-  }
-
-  private func handlePhotoSelection(_ items: [PhotosPickerItem]) {
+  private func movePhoto(from: Int, to: Int) {
+    guard from != to,
+          from >= 0, to >= 0,
+          from < userViewModel.user.datingImages.count,
+          to < userViewModel.user.datingImages.count else { return }
+    
+    let oldImages = userViewModel.user.datingImages
+    var updated = oldImages
+    let movedItem = updated.remove(at: from)
+    updated.insert(movedItem, at: to)
+    userViewModel.user.datingImages = updated
+    selectedPhotoIndex = to // Update selection to follow the moved photo
+    
     Task {
       do {
-        for item in items {
-          if let data = try await item.loadTransferable(type: Data.self) {
-            let url = try await viewModel.uploadDatingPhoto(imageData: data)
-            viewModel.user.datingImages.append(url)
-            try await viewModel.updateUser()
-          }
-        }
+        try await userViewModel.updateUser()
       } catch {
-        print("Error handling photo selection: \(error)")
+        userViewModel.user.datingImages = oldImages
+        selectedPhotoIndex = from // Restore selection on error
+        print("Error moving photo: \(error)")
       }
-      selectedPhotos.removeAll()
     }
+  }
+
+  private func deletePhoto(at index: Int) {
+    guard index < userViewModel.user.datingImages.count else { return }
+    let oldImages = userViewModel.user.datingImages
+    var updated = oldImages
+    updated.remove(at: index)
+    userViewModel.user.datingImages = updated
+    
+    Task {
+      do {
+        try await userViewModel.updateUser()
+      } catch {
+        userViewModel.user.datingImages = oldImages
+        print("Error deleting photo: \(error)")
+      }
+    }
+  }
+
+  private func updateUserField<T>(_ keyPath: WritableKeyPath<User, T>, _ value: T) {
+    var updatedUser = userViewModel.user
+    updatedUser[keyPath: keyPath] = value
+    userViewModel.user = updatedUser
+    
+    Task {
+      do {
+        try await userViewModel.updateUser()
+      } catch {
+        print("[ERROR] Failed to update user field: \(error)")
+        showError("Failed to save changes. Please try again.")
+      }
+    }
+  }
+
+  private func deactivateDating() async {
+    do {
+      var updatedUser = userViewModel.user
+      updatedUser.isDatingEnabled = false
+      userViewModel.user = updatedUser
+      try await userViewModel.updateUser()
+      dismiss()
+    } catch {
+      print("[ERROR] Failed to deactivate dating: \(error)")
+      await MainActor.run {
+        showError("Failed to deactivate dating. Please try again.")
+      }
+    }
+  }
+
+  private func updateDatingStatus(_ isEnabled: Bool) {
+    Task {
+      do {
+        var updatedUser = userViewModel.user
+        updatedUser.isDatingEnabled = isEnabled
+        userViewModel.user = updatedUser
+        try await userViewModel.updateUser()
+      } catch {
+        print("[ERROR] Failed to update dating status: \(error)")
+        showError("Failed to update dating status. Please try again.")
+      }
+    }
+  }
+  
+  private func showError(_ message: String) {
+    alertType = .error(message)
+    showAlert = true
   }
 }
 
-struct MultipleSelectionList<T: Hashable & Identifiable>: View {
-  let title: String
-  let options: [T]
-  let selected: Set<T>
-  let onSelectionChanged: (Set<T>) -> Void
-  @State private var selectedItems: Set<T>
-  @Environment(\.dismiss) private var dismiss
-
-  init(
-    title: String, options: [T], selected: Set<T>,
-    onSelectionChanged: @escaping (Set<T>) -> Void
-  ) {
-    self.title = title
-    self.options = options
-    self.selected = selected
-    self.onSelectionChanged = onSelectionChanged
-    _selectedItems = State(initialValue: selected)
-  }
-
-  var body: some View {
-    List(options) { option in
-      Button {
-        if selectedItems.contains(option) {
-          selectedItems.remove(option)
-        } else {
-          selectedItems.insert(option)
-        }
-      } label: {
-        HStack {
-          if let gender = option as? User.Gender {
-            Text(gender.rawValue.capitalized)
-          }
-          Spacer()
-          if selectedItems.contains(option) {
-            Image(systemName: "checkmark")
-              .foregroundColor(.blue)
-          }
-        }
-      }
-      .foregroundColor(.primary)
-    }
-    .navigationTitle(title)
-    .toolbar {
-      ToolbarItem(placement: .navigationBarTrailing) {
-        Button("Done") {
-          onSelectionChanged(selectedItems)
-          dismiss()
-        }
-      }
-    }
-  }
-}
-
+// MARK: - Preview
 #Preview {
   NavigationView {
-    DatingSettingsView()
+    DatingSettingsView(userId: "")
       .environment(UserViewModel())
   }
 }

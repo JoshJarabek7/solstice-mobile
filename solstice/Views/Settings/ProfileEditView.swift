@@ -121,7 +121,11 @@ struct ProfileEditView: View {
         let url = try await userViewModel.uploadDatingPhoto(imageData: data)
         await MainActor.run {
           localUser.profileImageURL = url
+          var updatedUser = userViewModel.user
+          updatedUser.profileImageURL = url
+          userViewModel.user = updatedUser
         }
+        try await userViewModel.updateUser()
       } catch {
         await MainActor.run {
           errorMessage = "Error updating profile photo: \(error.localizedDescription)"

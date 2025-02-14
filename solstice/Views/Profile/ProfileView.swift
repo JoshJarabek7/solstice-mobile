@@ -1,3 +1,4 @@
+// ProfileView.swift
 import FirebaseAuth
 import FirebaseFirestore
 import SwiftUI
@@ -393,6 +394,8 @@ struct DatingProfileSection: View {
           isPresented: $showPhotoViewer
         )
       }
+      // Force view recreation when index changes
+      .id("photoViewer_\(selectedPhotoIndex)")
 
       // Like/Dislike Buttons
       if canInteract {

@@ -5,6 +5,9 @@ struct SettingsView: View {
   @Environment(UserViewModel.self) private var userViewModel
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var authViewModel: AuthViewModel
+  @State private var showDatingSettings = false
+  @State private var showError = false
+  @State private var errorMessage = ""
 
   var body: some View {
     NavigationView {
@@ -57,7 +60,16 @@ struct SettingsView: View {
           }
 
           if userViewModel.user.isDatingEnabled {
-            NavigationLink(destination: DatingSettingsView()) {
+            Button(action: {
+              if let userId = Auth.auth().currentUser?.uid {
+                print("[DEBUG] Opening dating settings with userId: \(userId)")
+                showDatingSettings = true
+              } else {
+                print("[ERROR] No auth user ID available")
+                errorMessage = "Please sign in again to access dating settings."
+                showError = true
+              }
+            }) {
               Label("Dating Settings", systemImage: "heart.circle")
             }
           }
@@ -81,6 +93,18 @@ struct SettingsView: View {
         }
       }
       .navigationTitle("Settings")
+    }
+    .sheet(isPresented: $showDatingSettings) {
+      if let userId = Auth.auth().currentUser?.uid {
+        NavigationStack {
+          DatingSettingsView(userId: userId)
+        }
+      }
+    }
+    .alert("Error", isPresented: $showError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(errorMessage)
     }
   }
 }
