@@ -93,6 +93,20 @@
       ]
     },
     {
+      "collectionGroup": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participants",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "lastActivity",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "followers",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -159,6 +173,20 @@
         {
           "fieldPath": "creatorId",
           "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "videos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "engagementScore",
+          "order": "DESCENDING"
         },
         {
           "fieldPath": "createdAt",

@@ -2,22 +2,34 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     // Allow read access to all files for authenticated users
     match /{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isSignedIn();
     }
-    
-    // Allow users to upload their own profile images
+
+    // Allow video uploads and downloads
+    match /videos/{videoId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Allow profile image uploads
     match /users/{userId}/profile/{fileName} {
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
     }
-    
-    // Allow users to upload their own dating profile images
+
+    // Allow dating profile image uploads
     match /users/{userId}/dating/{fileName} {
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
     }
     
-    // Allow users to upload their own videos
+    // Allow users to upload their own videos (original path)
     match /users/{userId}/videos/{fileName} {
       allow write: if request.auth != null && request.auth.uid == userId;
     }
